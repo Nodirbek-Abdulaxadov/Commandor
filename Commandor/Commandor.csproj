@@ -9,7 +9,7 @@
     <PackageId>ICommandor</PackageId>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <RepositoryUrl>https://github.com/Nodirbek-Abdulaxadov/Commandor</RepositoryUrl>
-    <Version>1.0.5</Version>
+    <Version>1.0.6</Version>
     <PackageReleaseNotes>test</PackageReleaseNotes>
     <IsPackable>true</IsPackable>
   </PropertyGroup>
