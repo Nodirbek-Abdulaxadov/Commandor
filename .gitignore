@@ -363,3 +363,6 @@ MigrationBackup/
 FodyWeavers.xsd
 /.vscode
 *.txt
+/WebApplication1/app.db
+/WebApplication1/app.db-shm
+/WebApplication1/app.db-wal
