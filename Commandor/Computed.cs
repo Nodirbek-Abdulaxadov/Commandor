@@ -138,3 +138,101 @@ public static class ComputedRegistry
         _registry.Clear();
     }
 }
+
+/// <summary>
+/// Computed value that is tied to a specific ICommandorService implementation.
+/// </summary>
+public sealed class ServiceComputed<T> : Computed<T>
+{
+    public Type ServiceType { get; }
+
+    public ServiceComputed(Type serviceType, string cacheKey, T? value) : base(cacheKey, value)
+    {
+        ServiceType = serviceType;
+    }
+
+    public ServiceComputed(Type serviceType, string cacheKey, Exception error) : base(cacheKey, error)
+    {
+        ServiceType = serviceType;
+    }
+}
+
+/// <summary>
+/// Registry for service-scoped computed values and cache invalidation.
+/// </summary>
+public static class ServiceCacheRegistry
+{
+    private sealed record CacheEntry(IComputed Computed, IComputedCache Cache);
+
+    private static readonly ConcurrentDictionary<Type, ConcurrentDictionary<string, CacheEntry>> _serviceEntries = new();
+    private static readonly ConcurrentDictionary<IComputedCache, byte> _knownCaches = new();
+
+    public static void TrackCache(IComputedCache cache)
+    {
+        _knownCaches.TryAdd(cache, 0);
+    }
+
+    public static bool TryGet<T>(Type serviceType, string cacheKey, out ServiceComputed<T>? computed)
+    {
+        computed = null;
+
+        if (_serviceEntries.TryGetValue(serviceType, out var entries) &&
+            entries.TryGetValue(cacheKey, out var entry))
+        {
+            computed = entry.Computed as ServiceComputed<T>;
+            if (computed != null && computed.IsConsistent())
+            {
+                return true;
+            }
+
+            entries.TryRemove(cacheKey, out _);
+            ComputedRegistry.Remove(cacheKey);
+        }
+
+        return false;
+    }
+
+    public static ServiceComputed<T> Register<T>(Type serviceType, string cacheKey, T? value, IComputedCache cache)
+    {
+        TrackCache(cache);
+
+        var computed = new ServiceComputed<T>(serviceType, cacheKey, value);
+        var entries = _serviceEntries.GetOrAdd(serviceType, _ => new ConcurrentDictionary<string, CacheEntry>());
+
+        entries[cacheKey] = new CacheEntry(computed, cache);
+        ComputedRegistry.Register(computed);
+
+        return computed;
+    }
+
+    public static void InvalidateService(Type serviceType)
+    {
+        if (!_serviceEntries.TryRemove(serviceType, out var entries))
+            return;
+
+        foreach (var entry in entries.ToArray())
+        {
+            entry.Value.Computed.Invalidate();
+            entry.Value.Cache.Remove(entry.Key);
+            ComputedRegistry.Remove(entry.Key);
+        }
+    }
+
+    public static void InvalidateAll()
+    {
+        foreach (var serviceType in _serviceEntries.Keys.ToArray())
+        {
+            InvalidateService(serviceType);
+        }
+
+        _serviceEntries.Clear();
+
+        foreach (var cache in _knownCaches.Keys)
+        {
+            cache.Clear();
+        }
+
+        ComputedRegistry.Clear();
+        _knownCaches.Clear();
+    }
+}

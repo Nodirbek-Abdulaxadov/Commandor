@@ -209,6 +209,57 @@ public class CachingTests
     }
 
     [Fact]
+    public void ServiceCacheRegistry_InvalidateService_ShouldRemoveEntries()
+    {
+        // Arrange
+        ServiceCacheRegistry.InvalidateAll();
+        var cache = new CommandorMemoryCache();
+        var key = "DummyService.Method(1)";
+
+        ServiceCacheRegistry.Register(typeof(DummyService), key, "v1", cache);
+        cache.Set(key, new CacheEnvelope<string> { HasValue = true, Value = "v1" });
+
+        // Act
+        var found = ServiceCacheRegistry.TryGet<string>(typeof(DummyService), key, out ServiceComputed<string>? computedBefore);
+        Assert.True(found);
+        Assert.NotNull(computedBefore);
+        Assert.True(computedBefore!.IsConsistent());
+        Assert.True(computedBefore.HasValue);
+
+        ServiceCacheRegistry.InvalidateService(typeof(DummyService));
+
+        // Assert
+        var stillThere = ServiceCacheRegistry.TryGet<string>(typeof(DummyService), key, out _);
+        Assert.False(stillThere);
+        Assert.Null(cache.Get<CacheEnvelope<string>>(key));
+        Assert.Equal(ConsistencyState.Invalidated, computedBefore.ConsistencyState);
+    }
+
+    [Fact]
+    public void ServiceCacheRegistry_InvalidateAll_ShouldClearAllServices()
+    {
+        // Arrange
+        ServiceCacheRegistry.InvalidateAll();
+        var cache = new CommandorMemoryCache();
+        var key1 = "DummyService.Method(1)";
+        var key2 = "AnotherService.Method(2)";
+
+        ServiceCacheRegistry.Register<string>(typeof(DummyService), key1, "v1", cache);
+        cache.Set(key1, new CacheEnvelope<string> { HasValue = true, Value = "v1" });
+        ServiceCacheRegistry.Register<string>(typeof(AnotherService), key2, "v2", cache);
+        cache.Set(key2, new CacheEnvelope<string> { HasValue = true, Value = "v2" });
+
+        // Act
+        ServiceCacheRegistry.InvalidateAll();
+
+        // Assert
+        Assert.Null(cache.Get<CacheEnvelope<string>>(key1));
+        Assert.Null(cache.Get<CacheEnvelope<string>>(key2));
+        Assert.False(ServiceCacheRegistry.TryGet<string>(typeof(DummyService), key1, out _));
+        Assert.False(ServiceCacheRegistry.TryGet<string>(typeof(AnotherService), key2, out _));
+    }
+
+    [Fact]
     public void LiteApiComputedCache_SetAndGet_ShouldWork()
     {
         // Arrange
@@ -239,4 +290,8 @@ public class CachingTests
         public string Name { get; set; } = string.Empty;
         public decimal Price { get; set; }
     }
+
+    private class DummyService { }
+
+    private class AnotherService { }
 }

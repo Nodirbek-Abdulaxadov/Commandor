@@ -1,13 +1,17 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>net7.0;net8.0;net9.0</TargetFrameworks>
+    <TargetFrameworks>net8.0;net9.0</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
     <PackageProjectUrl></PackageProjectUrl>
     <PackageId>ICommandor</PackageId>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <RepositoryUrl>https://github.com/Nodirbek-Abdulaxadov/Commandor</RepositoryUrl>
+    <Version>1.0.5</Version>
+    <PackageReleaseNotes>test</PackageReleaseNotes>
+    <IsPackable>true</IsPackable>
   </PropertyGroup>
 
   <ItemGroup>
@@ -21,5 +25,18 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.0" />
     <PackageReference Include="LiteAPI.Cache" Version="1.1.0" />
   </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Commandor.Generators\Commandor.Generators.csproj" ReferenceOutputAssembly="false" OutputItemType="Analyzer" />
+  </ItemGroup>
+
+  <Target Name="PackGenerator" BeforeTargets="_GetPackageFiles">
+    <MSBuild Projects="..\Commandor.Generators\Commandor.Generators.csproj" Targets="Build" Properties="Configuration=$(Configuration)" />
+
+    <ItemGroup>
+      <None Include="..\Commandor.Generators\bin\$(Configuration)\netstandard2.0\Commandor.Generators.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
+      <None Include="..\Commandor.Generators\bin\$(Configuration)\netstandard2.0\Commandor.Generators.pdb" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" Condition="Exists('..\\Commandor.Generators\\bin\\$(Configuration)\\netstandard2.0\\Commandor.Generators.pdb')" />
+    </ItemGroup>
+  </Target>
 
 </Project>

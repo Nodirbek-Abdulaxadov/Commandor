@@ -1,7 +1,8 @@
-using Microsoft.Extensions.DependencyInjection;
+using System;
 using System.Reflection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
-namespace Commandor;
+namespace Microsoft.Extensions.DependencyInjection;
 
 /// <summary>
 /// Commandor uchun DependencyInjection extension metodlari
@@ -17,7 +18,13 @@ public static class CommandorServiceCollectionExtensions
     public static IServiceCollection AddCommandor(this IServiceCollection services, params Assembly[] assemblies)
     {
         // Commandorni singleton sifatida qo'shish
-        services.AddSingleton<ICommandor, Commandor>();
+        services.AddSingleton<global::Commandor.ICommandor, global::Commandor.Commandor>();
+        services.TryAddSingleton<global::Commandor.IComputedCache>(_ =>
+        {
+            var cache = CreateDefaultCache();
+            global::Commandor.ServiceCacheRegistry.TrackCache(cache);
+            return cache;
+        });
 
         // Agar assemblylar berilmagan bo'lsa, chaqiruvchi assemblyni ishlatish
         var assembliesToScan = assemblies.Length > 0
@@ -41,7 +48,7 @@ public static class CommandorServiceCollectionExtensions
     /// <param name="services">Service collection</param>
     /// <returns>Service collection</returns>
     public static IServiceCollection AddCommandorService<TService, TImplementation>(this IServiceCollection services)
-        where TService : class, ICommandorService
+        where TService : class, global::Commandor.ICommandorService
         where TImplementation : class, TService
     {
         // Service'ni qo'shish
@@ -66,7 +73,7 @@ public static class CommandorServiceCollectionExtensions
                 ImplementationType = t,
                 Interfaces = t.GetInterfaces()
                     .Where(i => i.IsGenericType &&
-                               i.GetGenericTypeDefinition() == typeof(IRequestHandler<>) &&
+                               i.GetGenericTypeDefinition() == typeof(global::Commandor.IRequestHandler<>) &&
                                i.GenericTypeArguments.Length == 1)
             })
             .Where(x => x.Interfaces.Any());
@@ -87,7 +94,7 @@ public static class CommandorServiceCollectionExtensions
                 ImplementationType = t,
                 Interfaces = t.GetInterfaces()
                     .Where(i => i.IsGenericType &&
-                               i.GetGenericTypeDefinition() == typeof(IRequestHandler<,>) &&
+                               i.GetGenericTypeDefinition() == typeof(global::Commandor.IRequestHandler<,>) &&
                                i.GenericTypeArguments.Length == 2)
             })
             .Where(x => x.Interfaces.Any());
@@ -111,8 +118,8 @@ public static class CommandorServiceCollectionExtensions
 
         // Service namespace'dagi barcha auto-generated handlerlarni topish
         var handlerTypes = assembly.GetTypes()
-            .Where(t => t.IsClass && 
-                       !t.IsAbstract && 
+            .Where(t => t.IsClass &&
+                       !t.IsAbstract &&
                        t.Namespace == serviceType.Namespace &&
                        t.Name.EndsWith("Handler"))
             .ToList();
@@ -121,9 +128,9 @@ public static class CommandorServiceCollectionExtensions
         {
             // Handler'ning implement qilgan interfeyslari
             var handlerInterfaces = handlerType.GetInterfaces()
-                .Where(i => i.IsGenericType && 
-                           (i.GetGenericTypeDefinition() == typeof(IRequestHandler<>) ||
-                            i.GetGenericTypeDefinition() == typeof(IRequestHandler<,>)))
+                .Where(i => i.IsGenericType &&
+                           (i.GetGenericTypeDefinition() == typeof(global::Commandor.IRequestHandler<>) ||
+                            i.GetGenericTypeDefinition() == typeof(global::Commandor.IRequestHandler<,>)))
                 .ToList();
 
             foreach (var handlerInterface in handlerInterfaces)
@@ -131,5 +138,21 @@ public static class CommandorServiceCollectionExtensions
                 services.AddTransient(handlerInterface, handlerType);
             }
         }
+    }
+
+    private static global::Commandor.IComputedCache CreateDefaultCache()
+    {
+        try
+        {
+            return new global::Commandor.LiteApiComputedCache();
+        }
+        catch (DllNotFoundException)
+        {
+        }
+        catch (TypeInitializationException ex) when (ex.InnerException is DllNotFoundException)
+        {
+        }
+
+        return new global::Commandor.CommandorMemoryCache();
     }
 }

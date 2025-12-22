@@ -8,68 +8,55 @@ using System.Text;
 
 namespace Commandor.Generators;
 
-/// <summary>
-/// Commandor Source Generator - [CommandHandler] attribute'li metodlar uchun
-/// avtomatik IRequestHandler implementatsiyalarini yaratadi
-/// </summary>
 [Generator]
 public class CommandHandlerGenerator : ISourceGenerator
 {
     public void Initialize(GeneratorInitializationContext context)
     {
-        // Syntax receiver registratsiya qilish
         context.RegisterForSyntaxNotifications(() => new CommandHandlerSyntaxReceiver());
     }
 
     public void Execute(GeneratorExecutionContext context)
     {
-        // Syntax receiver dan ma'lumotlarni olish
         if (context.SyntaxReceiver is not CommandHandlerSyntaxReceiver receiver)
             return;
 
-        // Har bir interface uchun handlerlar yaratish
         foreach (var interfaceDecl in receiver.CandidateInterfaces)
         {
             var model = context.Compilation.GetSemanticModel(interfaceDecl.SyntaxTree);
             var interfaceSymbol = model.GetDeclaredSymbol(interfaceDecl) as INamedTypeSymbol;
-            
+
             if (interfaceSymbol == null)
                 continue;
 
-            // Interface'dagi [CommandHandler] attribute'li metodlarni topish
             var handlerMethods = GetHandlerMethods(interfaceSymbol, context.Compilation);
-            
             if (!handlerMethods.Any())
                 continue;
 
-            // Handler sinfini generatsiya qilish
             var source = GenerateHandlers(interfaceSymbol, handlerMethods, context.Compilation);
-            
-            if (!string.IsNullOrEmpty(source))
-            {
-                var fileName = $"{interfaceSymbol.ToDisplayString().Replace(".", "_").Replace("<", "_").Replace(">", "_")}_Handlers.g.cs";
-                context.AddSource(fileName, SourceText.From(source, Encoding.UTF8));
-            }
+            if (string.IsNullOrEmpty(source))
+                continue;
+
+            var fileName = $"{interfaceSymbol.ToDisplayString().Replace(".", "_").Replace("<", "_").Replace(">", "_")}_Handlers.g.cs";
+            context.AddSource(fileName, SourceText.From(source, Encoding.UTF8));
         }
     }
 
-    private List<IMethodSymbol> GetHandlerMethods(INamedTypeSymbol interfaceSymbol, Compilation compilation)
+    private static List<IMethodSymbol> GetHandlerMethods(INamedTypeSymbol interfaceSymbol, Compilation compilation)
     {
         var handlerMethods = new List<IMethodSymbol>();
-        
-        // [CommandHandler] yoki [QueryHandler] attribute'larni topish
+
         var commandHandlerAttribute = compilation.GetTypeByMetadataName("Commandor.CommandHandlerAttribute");
         var queryHandlerAttribute = compilation.GetTypeByMetadataName("Commandor.QueryHandlerAttribute");
-        
+
         if (commandHandlerAttribute == null && queryHandlerAttribute == null)
             return handlerMethods;
 
         foreach (var member in interfaceSymbol.GetMembers().OfType<IMethodSymbol>())
         {
-            // [CommandHandler] yoki [QueryHandler] attribute borligini tekshirish
-            if (member.GetAttributes().Any(attr => 
-                SymbolEqualityComparer.Default.Equals(attr.AttributeClass, commandHandlerAttribute) ||
-                SymbolEqualityComparer.Default.Equals(attr.AttributeClass, queryHandlerAttribute)))
+            if (member.GetAttributes().Any(attr =>
+                    SymbolEqualityComparer.Default.Equals(attr.AttributeClass, commandHandlerAttribute) ||
+                    SymbolEqualityComparer.Default.Equals(attr.AttributeClass, queryHandlerAttribute)))
             {
                 handlerMethods.Add(member);
             }
@@ -78,7 +65,7 @@ public class CommandHandlerGenerator : ISourceGenerator
         return handlerMethods;
     }
 
-    private string GenerateHandlers(INamedTypeSymbol interfaceSymbol, List<IMethodSymbol> handlerMethods, Compilation compilation)
+    private static string GenerateHandlers(INamedTypeSymbol interfaceSymbol, List<IMethodSymbol> handlerMethods, Compilation compilation)
     {
         var sb = new StringBuilder();
         var namespaceName = interfaceSymbol.ContainingNamespace.ToDisplayString();
@@ -93,120 +80,136 @@ public class CommandHandlerGenerator : ISourceGenerator
         {
             var handlerSource = GenerateHandler(interfaceSymbol, method, compilation);
             if (!string.IsNullOrEmpty(handlerSource))
-            {
                 sb.AppendLine(handlerSource);
-            }
         }
 
         sb.AppendLine("}");
-
         return sb.ToString();
     }
 
-    private string GenerateHandler(INamedTypeSymbol interfaceSymbol, IMethodSymbol method, Compilation compilation)
+    private static string GenerateHandler(INamedTypeSymbol interfaceSymbol, IMethodSymbol method, Compilation compilation)
     {
-        // Metod parametrlarini tekshirish
         if (method.Parameters.Length == 0)
             return string.Empty;
 
-        var commandParameter = method.Parameters[0];
-        var commandType = commandParameter.Type;
+        var requestParameter = method.Parameters[0];
+        var requestType = requestParameter.Type;
         var returnType = method.ReturnType;
 
-        // Task<T> yoki Task ni tekshirish
-        if (returnType is not INamedTypeSymbol namedReturnType || 
-            namedReturnType.Name != "Task")
+        if (returnType is not INamedTypeSymbol namedReturnType || namedReturnType.Name != "Task")
             return string.Empty;
 
-        // Response tipini aniqlash
-        var responseType = namedReturnType.TypeArguments.Length > 0 
-            ? namedReturnType.TypeArguments[0] 
-            : null;
+        var responseType = namedReturnType.TypeArguments.Length > 0 ? namedReturnType.TypeArguments[0] : null;
 
-        var sb = new StringBuilder();
-        var handlerName = $"{method.Name}Handler";
-        
-        // Fully qualified names global:: bilan
+        var commandAttribute = compilation.GetTypeByMetadataName("Commandor.CommandHandlerAttribute");
+        var queryAttribute = compilation.GetTypeByMetadataName("Commandor.QueryHandlerAttribute");
+
+        var isQueryHandler = queryAttribute != null && method.GetAttributes()
+            .Any(attr => SymbolEqualityComparer.Default.Equals(attr.AttributeClass, queryAttribute));
+
+        var isCommandHandler = commandAttribute != null && method.GetAttributes()
+            .Any(attr => SymbolEqualityComparer.Default.Equals(attr.AttributeClass, commandAttribute));
+
         var format = new SymbolDisplayFormat(
             typeQualificationStyle: SymbolDisplayTypeQualificationStyle.NameAndContainingTypesAndNamespaces,
             genericsOptions: SymbolDisplayGenericsOptions.IncludeTypeParameters,
-            globalNamespaceStyle: SymbolDisplayGlobalNamespaceStyle.Included
-        );
-        
-        var commandTypeName = commandType.ToDisplayString(format);
+            miscellaneousOptions: SymbolDisplayMiscellaneousOptions.IncludeNullableReferenceTypeModifier,
+            globalNamespaceStyle: SymbolDisplayGlobalNamespaceStyle.Included);
+
+        var requestTypeName = requestType.ToDisplayString(format);
         var responseTypeName = responseType?.ToDisplayString(format);
         var interfaceTypeName = interfaceSymbol.ToDisplayString(format);
 
-        sb.AppendLine($"    /// <summary>");
-        sb.AppendLine($"    /// Auto-generated handler for {method.Name}");
-        sb.AppendLine($"    /// </summary>");
-        
+        var sb = new StringBuilder();
+
+        // Service-prefixed class names to avoid collisions inside the same namespace.
+        // Example: ITodoService.Create(...) and IColorService.Create(...) => TodoCreateHandler / ColorCreateHandler
+        var servicePrefix = interfaceSymbol.Name.TrimStart('I');
+        var handlerName = $"{servicePrefix}{method.Name}Handler";
+
+        var needsCache = isQueryHandler || isCommandHandler;
+
         if (responseType != null)
         {
-            // Javobli handler
-            sb.AppendLine($"    internal sealed class {handlerName} : global::Commandor.IRequestHandler<{commandTypeName}, {responseTypeName}>");
-            sb.AppendLine($"    {{");
+            sb.AppendLine($"    internal sealed class {handlerName} : global::Commandor.IRequestHandler<{requestTypeName}, {responseTypeName}>");
+            sb.AppendLine("    {");
             sb.AppendLine($"        private readonly {interfaceTypeName} _service;");
+            if (needsCache)
+                sb.AppendLine("        private readonly global::Commandor.IComputedCache _cache;");
             sb.AppendLine();
-            sb.AppendLine($"        public {handlerName}({interfaceTypeName} service)");
-            sb.AppendLine($"        {{");
-            sb.AppendLine($"            _service = service ?? throw new global::System.ArgumentNullException(nameof(service));");
-            sb.AppendLine($"        }}");
+            sb.AppendLine($"        public {handlerName}({interfaceTypeName} service{(needsCache ? ", global::Commandor.IComputedCache cache" : string.Empty)})");
+            sb.AppendLine("        {");
+            sb.AppendLine("            _service = service ?? throw new global::System.ArgumentNullException(nameof(service));");
+            if (needsCache)
+                sb.AppendLine("            _cache = cache ?? throw new global::System.ArgumentNullException(nameof(cache));");
+            sb.AppendLine("        }");
             sb.AppendLine();
-            sb.AppendLine($"        public async global::System.Threading.Tasks.Task<{responseTypeName}> HandleAsync({commandTypeName} request, global::System.Threading.CancellationToken cancellationToken = default)");
-            sb.AppendLine($"        {{");
-            sb.AppendLine($"            return await _service.{method.Name}(request, cancellationToken).ConfigureAwait(false);");
-            sb.AppendLine($"        }}");
-            sb.AppendLine($"    }}");
+            sb.AppendLine($"        public async global::System.Threading.Tasks.Task<{responseTypeName}> HandleAsync({requestTypeName} request, global::System.Threading.CancellationToken cancellationToken = default)");
+            sb.AppendLine("        {");
+            if (isQueryHandler)
+            {
+                sb.AppendLine($"            var cacheKey = global::Commandor.CacheKeyBuilder.Build(typeof({interfaceTypeName}), \"{method.Name}\", request);");
+                sb.AppendLine($"            var cached = _cache.Get<global::Commandor.CacheEnvelope<{responseTypeName}>>(cacheKey);");
+                sb.AppendLine("            if (cached != null && cached.HasValue)");
+                sb.AppendLine("                return cached.Value;\n");
+                sb.AppendLine($"            var result = await _service.{method.Name}(request, cancellationToken).ConfigureAwait(false);");
+                sb.AppendLine($"            _cache.Set(cacheKey, new global::Commandor.CacheEnvelope<{responseTypeName}> {{ HasValue = true, Value = result! }});");
+                sb.AppendLine("            return result;");
+            }
+            else
+            {
+                sb.AppendLine($"            var result = await _service.{method.Name}(request, cancellationToken).ConfigureAwait(false);");
+                if (isCommandHandler)
+                    sb.AppendLine("            _cache.Clear();");
+                sb.AppendLine("            return result;");
+            }
+            sb.AppendLine("        }");
+            sb.AppendLine("    }");
         }
         else
         {
-            // Javobsiz handler
-            sb.AppendLine($"    internal sealed class {handlerName} : global::Commandor.IRequestHandler<{commandTypeName}>");
-            sb.AppendLine($"    {{");
+            sb.AppendLine($"    internal sealed class {handlerName} : global::Commandor.IRequestHandler<{requestTypeName}>");
+            sb.AppendLine("    {");
             sb.AppendLine($"        private readonly {interfaceTypeName} _service;");
+            if (needsCache)
+                sb.AppendLine("        private readonly global::Commandor.IComputedCache _cache;");
             sb.AppendLine();
-            sb.AppendLine($"        public {handlerName}({interfaceTypeName} service)");
-            sb.AppendLine($"        {{");
-            sb.AppendLine($"            _service = service ?? throw new global::System.ArgumentNullException(nameof(service));");
-            sb.AppendLine($"        }}");
+            sb.AppendLine($"        public {handlerName}({interfaceTypeName} service{(needsCache ? ", global::Commandor.IComputedCache cache" : string.Empty)})");
+            sb.AppendLine("        {");
+            sb.AppendLine("            _service = service ?? throw new global::System.ArgumentNullException(nameof(service));");
+            if (needsCache)
+                sb.AppendLine("            _cache = cache ?? throw new global::System.ArgumentNullException(nameof(cache));");
+            sb.AppendLine("        }");
             sb.AppendLine();
-            sb.AppendLine($"        public async global::System.Threading.Tasks.Task HandleAsync({commandTypeName} request, global::System.Threading.CancellationToken cancellationToken = default)");
-            sb.AppendLine($"        {{");
+            sb.AppendLine($"        public async global::System.Threading.Tasks.Task HandleAsync({requestTypeName} request, global::System.Threading.CancellationToken cancellationToken = default)");
+            sb.AppendLine("        {");
             sb.AppendLine($"            await _service.{method.Name}(request, cancellationToken).ConfigureAwait(false);");
-            sb.AppendLine($"        }}");
-            sb.AppendLine($"    }}");
+            if (isCommandHandler)
+                sb.AppendLine("            _cache.Clear();");
+            sb.AppendLine("        }");
+            sb.AppendLine("    }");
         }
 
         sb.AppendLine();
-
         return sb.ToString();
     }
 }
 
-/// <summary>
-/// Syntax Receiver - interface'larni topish uchun
-/// </summary>
-internal class CommandHandlerSyntaxReceiver : ISyntaxReceiver
+internal sealed class CommandHandlerSyntaxReceiver : ISyntaxReceiver
 {
     public List<InterfaceDeclarationSyntax> CandidateInterfaces { get; } = new();
 
     public void OnVisitSyntaxNode(SyntaxNode syntaxNode)
     {
-        // Interface'larni topish
-        if (syntaxNode is InterfaceDeclarationSyntax interfaceDecl)
+        if (syntaxNode is not InterfaceDeclarationSyntax interfaceDecl)
+            return;
+
+        foreach (var member in interfaceDecl.Members)
         {
-            // Metodlarida attribute borligini tekshirish
-            foreach (var member in interfaceDecl.Members)
+            if (member is MethodDeclarationSyntax methodDecl && methodDecl.AttributeLists.Count > 0)
             {
-                if (member is MethodDeclarationSyntax methodDecl)
-                {
-                    if (methodDecl.AttributeLists.Count > 0)
-                    {
-                        CandidateInterfaces.Add(interfaceDecl);
-                        break;
-                    }
-                }
+                CandidateInterfaces.Add(interfaceDecl);
+                break;
             }
         }
     }

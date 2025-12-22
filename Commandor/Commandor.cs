@@ -7,11 +7,11 @@ namespace Commandor;
 /// </summary>
 public class Commandor : ICommandor
 {
-    private readonly IServiceProvider _serviceProvider;
+    private readonly IServiceScopeFactory _scopeFactory;
 
-    public Commandor(IServiceProvider serviceProvider)
+    public Commandor(IServiceScopeFactory scopeFactory)
     {
-        _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
+        _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
     }
 
     /// <summary>
@@ -23,8 +23,11 @@ public class Commandor : ICommandor
         if (request == null)
             throw new ArgumentNullException(nameof(request));
 
+        using var scope = _scopeFactory.CreateScope();
+        var serviceProvider = scope.ServiceProvider;
+
         var handlerType = typeof(IRequestHandler<>).MakeGenericType(typeof(TRequest));
-        var handler = _serviceProvider.GetService(handlerType);
+        var handler = serviceProvider.GetService(handlerType);
 
         if (handler == null)
             throw new InvalidOperationException($"Handler topilmadi: {typeof(TRequest).Name}");
@@ -45,9 +48,12 @@ public class Commandor : ICommandor
         if (request == null)
             throw new ArgumentNullException(nameof(request));
 
+        using var scope = _scopeFactory.CreateScope();
+        var serviceProvider = scope.ServiceProvider;
+
         var requestType = request.GetType();
         var handlerType = typeof(IRequestHandler<,>).MakeGenericType(requestType, typeof(TResponse));
-        var handler = _serviceProvider.GetService(handlerType);
+        var handler = serviceProvider.GetService(handlerType);
 
         if (handler == null)
             throw new InvalidOperationException($"Handler topilmadi: {requestType.Name}");

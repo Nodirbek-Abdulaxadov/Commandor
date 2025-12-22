@@ -1,8 +1,7 @@
 namespace Commandor;
 
 /// <summary>
-/// Query handler methodini belgilaydi (GET operatsiyalar).
-/// Keyinchalik caching qo'shiladi (ActualLab.Fusion ComputeMethod kabi).
+/// Query handler methodini belgilaydi (GET operatsiyalar) va natijani avtomatik cache'laydi.
 /// Source Generator tomonidan IRequestHandler yaratiladi.
 /// </summary>
 [AttributeUsage(AttributeTargets.Method, AllowMultiple = false, Inherited = false)]
@@ -20,8 +19,7 @@ public class QueryHandlerAttribute : Attribute
 
     /// <summary>
     /// Cache TTL (Time To Live) sekundlarda.
-    /// Default: 0 (caching o'chirilgan).
-    /// TODO: Keyinchalik caching mexanizm qo'shiladi.
+    /// Hozircha dekorativ property, tez orada real TTL bilan ishlaydi.
     /// </summary>
     public int CacheTtlSeconds { get; set; }
 }

@@ -10,10 +10,11 @@ public class GeneratorCommandorTests
 
     public GeneratorCommandorTests()
     {
+        ProductService.ResetState();
         var services = new ServiceCollection();
 
         // Commandorni qo'shish
-        services.AddSingleton<ICommandor, Commandor>();
+        services.AddCommandor();
 
         // Service va uning auto-generated handlerlarini qo'shish
         services.AddCommandorService<IProductService, ProductService>();
@@ -95,7 +96,7 @@ public class GeneratorCommandorTests
         // Act - First call
         var product1 = await _commandor.SendAsync(query);
         
-        // Act - Second call (should be same instance or at least same data)
+        // Act - Second call (should be served from cache)
         var product2 = await _commandor.SendAsync(query);
 
         // Assert
@@ -104,5 +105,6 @@ public class GeneratorCommandorTests
         Assert.Equal(product1.Id, product2.Id);
         Assert.Equal(product1.Name, product2.Name);
         Assert.Equal(product1.Price, product2.Price);
+        Assert.Equal(1, ProductService.GetProductByIdCallCount);
     }
 }

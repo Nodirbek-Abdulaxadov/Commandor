@@ -47,6 +47,15 @@ public interface IProductService : ICommandorService
 public class ProductService : IProductService
 {
     private static readonly List<ProductDto> _products = new();
+    private static int _getProductByIdCallCount;
+
+    public static int GetProductByIdCallCount => _getProductByIdCallCount;
+
+    public static void ResetState()
+    {
+        _products.Clear();
+        System.Threading.Interlocked.Exchange(ref _getProductByIdCallCount, 0);
+    }
 
     public Task<ProductDto> CreateProduct(CreateProductCommand command, CancellationToken cancellationToken = default)
     {
@@ -74,6 +83,7 @@ public class ProductService : IProductService
 
     public Task<ProductDto?> GetProductById(GetProductByIdQuery query, CancellationToken cancellationToken = default)
     {
+        System.Threading.Interlocked.Increment(ref _getProductByIdCallCount);
         var product = _products.FirstOrDefault(p => p.Id == query.ProductId);
         return Task.FromResult(product);
     }
