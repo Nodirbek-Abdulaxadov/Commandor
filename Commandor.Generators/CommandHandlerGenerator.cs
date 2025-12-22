@@ -101,14 +101,10 @@ public class CommandHandlerGenerator : ISourceGenerator
 
         var responseType = namedReturnType.TypeArguments.Length > 0 ? namedReturnType.TypeArguments[0] : null;
 
-        var commandAttribute = compilation.GetTypeByMetadataName("Commandor.CommandHandlerAttribute");
         var queryAttribute = compilation.GetTypeByMetadataName("Commandor.QueryHandlerAttribute");
 
         var isQueryHandler = queryAttribute != null && method.GetAttributes()
             .Any(attr => SymbolEqualityComparer.Default.Equals(attr.AttributeClass, queryAttribute));
-
-        var isCommandHandler = commandAttribute != null && method.GetAttributes()
-            .Any(attr => SymbolEqualityComparer.Default.Equals(attr.AttributeClass, commandAttribute));
 
         var format = new SymbolDisplayFormat(
             typeQualificationStyle: SymbolDisplayTypeQualificationStyle.NameAndContainingTypesAndNamespaces,
@@ -121,26 +117,21 @@ public class CommandHandlerGenerator : ISourceGenerator
         var interfaceTypeName = interfaceSymbol.ToDisplayString(format);
 
         var sb = new StringBuilder();
-
-        // Service-prefixed class names to avoid collisions inside the same namespace.
-        // Example: ITodoService.Create(...) and IColorService.Create(...) => TodoCreateHandler / ColorCreateHandler
         var servicePrefix = interfaceSymbol.Name.TrimStart('I');
         var handlerName = $"{servicePrefix}{method.Name}Handler";
-
-        var needsCache = isQueryHandler || isCommandHandler;
 
         if (responseType != null)
         {
             sb.AppendLine($"    internal sealed class {handlerName} : global::Commandor.IRequestHandler<{requestTypeName}, {responseTypeName}>");
             sb.AppendLine("    {");
             sb.AppendLine($"        private readonly {interfaceTypeName} _service;");
-            if (needsCache)
+            if (isQueryHandler)
                 sb.AppendLine("        private readonly global::Commandor.IComputedCache _cache;");
             sb.AppendLine();
-            sb.AppendLine($"        public {handlerName}({interfaceTypeName} service{(needsCache ? ", global::Commandor.IComputedCache cache" : string.Empty)})");
+            sb.AppendLine($"        public {handlerName}({interfaceTypeName} service{(isQueryHandler ? ", global::Commandor.IComputedCache cache" : string.Empty)})");
             sb.AppendLine("        {");
             sb.AppendLine("            _service = service ?? throw new global::System.ArgumentNullException(nameof(service));");
-            if (needsCache)
+            if (isQueryHandler)
                 sb.AppendLine("            _cache = cache ?? throw new global::System.ArgumentNullException(nameof(cache));");
             sb.AppendLine("        }");
             sb.AppendLine();
@@ -158,10 +149,7 @@ public class CommandHandlerGenerator : ISourceGenerator
             }
             else
             {
-                sb.AppendLine($"            var result = await _service.{method.Name}(request, cancellationToken).ConfigureAwait(false);");
-                if (isCommandHandler)
-                    sb.AppendLine("            _cache.Clear();");
-                sb.AppendLine("            return result;");
+                sb.AppendLine($"            return await _service.{method.Name}(request, cancellationToken).ConfigureAwait(false);");
             }
             sb.AppendLine("        }");
             sb.AppendLine("    }");
@@ -171,21 +159,15 @@ public class CommandHandlerGenerator : ISourceGenerator
             sb.AppendLine($"    internal sealed class {handlerName} : global::Commandor.IRequestHandler<{requestTypeName}>");
             sb.AppendLine("    {");
             sb.AppendLine($"        private readonly {interfaceTypeName} _service;");
-            if (needsCache)
-                sb.AppendLine("        private readonly global::Commandor.IComputedCache _cache;");
             sb.AppendLine();
-            sb.AppendLine($"        public {handlerName}({interfaceTypeName} service{(needsCache ? ", global::Commandor.IComputedCache cache" : string.Empty)})");
+            sb.AppendLine($"        public {handlerName}({interfaceTypeName} service)");
             sb.AppendLine("        {");
             sb.AppendLine("            _service = service ?? throw new global::System.ArgumentNullException(nameof(service));");
-            if (needsCache)
-                sb.AppendLine("            _cache = cache ?? throw new global::System.ArgumentNullException(nameof(cache));");
             sb.AppendLine("        }");
             sb.AppendLine();
             sb.AppendLine($"        public async global::System.Threading.Tasks.Task HandleAsync({requestTypeName} request, global::System.Threading.CancellationToken cancellationToken = default)");
             sb.AppendLine("        {");
             sb.AppendLine($"            await _service.{method.Name}(request, cancellationToken).ConfigureAwait(false);");
-            if (isCommandHandler)
-                sb.AppendLine("            _cache.Clear();");
             sb.AppendLine("        }");
             sb.AppendLine("    }");
         }
