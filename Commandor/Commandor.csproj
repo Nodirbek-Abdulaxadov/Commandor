@@ -9,7 +9,7 @@
     <PackageId>ICommandor</PackageId>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <RepositoryUrl>https://github.com/Nodirbek-Abdulaxadov/Commandor</RepositoryUrl>
-    <Version>1.0.6</Version>
+    <Version>1.1.0</Version>
     <PackageReleaseNotes>test</PackageReleaseNotes>
     <IsPackable>true</IsPackable>
   </PropertyGroup>
@@ -22,8 +22,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.0" />
-    <PackageReference Include="LiteAPI.Cache" Version="1.1.0" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="9.0.0" />
   </ItemGroup>
 
   <ItemGroup>

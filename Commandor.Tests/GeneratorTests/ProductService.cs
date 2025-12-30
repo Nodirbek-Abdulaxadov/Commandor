@@ -57,7 +57,7 @@ public class ProductService : IProductService
         System.Threading.Interlocked.Exchange(ref _getProductByIdCallCount, 0);
     }
 
-    public Task<ProductDto> CreateProduct(CreateProductCommand command, CancellationToken cancellationToken = default)
+    public virtual Task<ProductDto> CreateProduct(CreateProductCommand command, CancellationToken cancellationToken = default)
     {
         var product = new ProductDto
         {
@@ -71,7 +71,7 @@ public class ProductService : IProductService
         return Task.FromResult(product);
     }
 
-    public Task UpdatePrice(UpdateProductPriceCommand command, CancellationToken cancellationToken = default)
+    public virtual Task UpdatePrice(UpdateProductPriceCommand command, CancellationToken cancellationToken = default)
     {
         var product = _products.FirstOrDefault(p => p.Id == command.ProductId);
         if (product != null)
@@ -81,7 +81,7 @@ public class ProductService : IProductService
         return Task.CompletedTask;
     }
 
-    public Task<ProductDto?> GetProductById(GetProductByIdQuery query, CancellationToken cancellationToken = default)
+    public virtual Task<ProductDto?> GetProductById(GetProductByIdQuery query, CancellationToken cancellationToken = default)
     {
         System.Threading.Interlocked.Increment(ref _getProductByIdCallCount);
         var product = _products.FirstOrDefault(p => p.Id == query.ProductId);

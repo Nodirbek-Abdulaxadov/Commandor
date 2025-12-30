@@ -1,12 +1,16 @@
 # Commandor
 
-## O'rnatish
+A lightweight CQRS/Mediator library for .NET with automatic caching and source generation.
+
+## Installation
 
 ```bash
 dotnet add package ICommandor
 ```
 
-## Ishlatish
+## Quick Start
+
+### 1. Define Your Service Interface
 
 ```csharp
 using Commandor;
@@ -25,46 +29,127 @@ public interface IColorService : ICommandorService
     [CommandHandler]
     Task Update(UpdateColorCommand command, CancellationToken ct = default);
 }
+```
 
+### 2. Implement Your Service
+
+```csharp
 public class ColorService : IColorService
 {
-    public virtual Task<ColorEntity> Create(CreateColorCommand command, CancellationToken ct = default) => throw new NotImplementedException();
-    public virtual Task<List<ColorEntity>> GetAll(GetAllColorsQuery query, CancellationToken ct = default) => throw new NotImplementedException();
-    public virtual Task<ColorEntity?> GetById(GetColorQuery query, CancellationToken ct = default) => throw new NotImplementedException();
-    public virtual Task Update(UpdateColorCommand command, CancellationToken ct = default) => throw new NotImplementedException();
-}
+    private readonly AppDbContext _db;
+    private readonly ICommandor _commandor;
 
+    public ColorService(AppDbContext db, ICommandor commandor)
+    {
+        _db = db;
+        _commandor = commandor;
+    }
+
+    public async Task<ColorEntity> Create(CreateColorCommand command, CancellationToken ct = default)
+    {
+        var color = new ColorEntity { Name = command.Name };
+        _db.Colors.Add(color);
+        await _db.SaveChangesAsync(ct);
+        
+        // Invalidate cache after mutation
+        _commandor.Invalidate<IColorService>();
+        
+        return color;
+    }
+
+    public Task<List<ColorEntity>> GetAll(GetAllColorsQuery query, CancellationToken ct = default)
+        => _db.Colors.ToListAsync(ct);
+
+    public Task<ColorEntity?> GetById(GetColorQuery query, CancellationToken ct = default)
+        => _db.Colors.FindAsync(new object[] { query.Id }, ct).AsTask();
+
+    public async Task Update(UpdateColorCommand command, CancellationToken ct = default)
+    {
+        var color = await _db.Colors.FindAsync(new object[] { command.Id }, ct);
+        if (color != null)
+        {
+            color.Name = command.Name;
+            await _db.SaveChangesAsync(ct);
+            
+            // Invalidate cache after mutation
+            _commandor.Invalidate<IColorService>();
+        }
+    }
+}
+```
+
+### 3. Register Services
+
+```csharp
 var services = new ServiceCollection();
 services.AddCommandor();
 services.AddCommandorService<IColorService, ColorService>();
 ```
 
-## Cache
+### 4. Use in Controllers
 
-- `[QueryHandler]` natijalari cache'lanadi.
-- `[CommandHandler]` bajarilganda cache tozalanadi (`IComputedCache.Clear()`).
+```csharp
+public class ColorsController : ControllerBase
+{
+    private readonly ICommandor _commandor;
 
-## ?? Muhim Eslatmalar
+    public ColorsController(ICommandor commandor) => _commandor = commandor;
+
+    [HttpGet]
+    public Task<List<ColorEntity>> GetAll()
+        => _commandor.SendAsync(new GetAllColorsQuery());
+
+    [HttpPost]
+    public Task<ColorEntity> Create(CreateColorCommand command)
+        => _commandor.SendAsync(command);
+}
+```
+
+## Features
+
+### Automatic Caching
+
+- `[QueryHandler]` results are automatically cached using `IMemoryCache`
+- Cache is invalidated per service using `ICommandor.Invalidate<TService>()`
+- No manual cache key management needed
+
+### Cache Invalidation
+
+**New in v1.0.7:** Use `ICommandor` for cache invalidation:
+
+```csharp
+// Invalidate all cached queries for a service
+_commandor.Invalidate<ITodoService>();
+
+// Or async version
+await _commandor.InvalidateAsync<ITodoService>();
+```
+
+### Source Generation
+
+Commandor automatically generates handler classes for methods marked with `[CommandHandler]` or `[QueryHandler]`. No boilerplate code needed!
+
+## Important Notes
 
 ### Command/Query Pattern
 
-Commandor'da **barcha method parametrlari `IRequest<TResponse>` yoki `IRequest` implement qilishi kerak**. Primitive type'larni to'g'ridan-to'g'ri ishlatish mumkin emas.
+**All method parameters must implement `IRequest<TResponse>` or `IRequest`.** Primitive types cannot be used directly.
 
-**? Noto'g'ri:**
+**❌ Incorrect:**
 ```csharp
 public interface ITodoService : ICommandorService
 {
     [CommandHandler]
-    Task<Todo> CreateTodoAsync(string title);  // ? string - IRequest emas
+    Task<Todo> CreateTodoAsync(string title);  // ❌ string is not IRequest
     
     [QueryHandler]
-    Task<Todo?> GetTodoByIdAsync(int id);  // ? int - IRequest emas
+    Task<Todo?> GetTodoByIdAsync(int id);  // ❌ int is not IRequest
 }
 ```
 
-**? To'g'ri:**
+**✅ Correct:**
 ```csharp
-// Request/Query record'larni yaratish
+// Define request/query records
 public record CreateTodoCommand(string Title) : IRequest<Todo>;
 public record GetTodoByIdQuery(int Id) : IRequest<Todo?>;
 
@@ -78,34 +163,35 @@ public interface ITodoService : ICommandorService
 }
 ```
 
-### Method Naming
+### Method Naming Conventions
 
-Method nomlari uchun quyidagi konvensiyalarni tavsiya qilamiz:
-- **Command'lar** uchun: `Create...`, `Update...`, `Delete...`, `Process...`
-- **Query'lar** uchun: `Get...`, `Find...`, `List...`, `Search...`
+Recommended naming patterns:
+- **Commands**: `Create...`, `Update...`, `Delete...`, `Process...`
+- **Queries**: `Get...`, `Find...`, `List...`, `Search...`
 
-### Cache Invalidation
+### Cache TTL (Optional)
 
-**CommandHandler'lar avtomatik cache'ni tozalamaydi!** Agar command'dan keyin query cache'ini invalidate qilish kerak bo'lsa, service implementation'ida qo'lda qiling:
+Specify cache duration per query:
 
 ```csharp
-public class TodoService(AppDbContext db, IComputedCache cache) : ITodoService
-{
-    public async Task<Todo> UpdateTodoAsync(UpdateTodoCommand cmd, CancellationToken ct)
-    {
-        var todo = await db.Todos.FindAsync([cmd.Id], ct);
-        if (todo != null)
-        {
-            todo.Title = cmd.Title;
-            await db.SaveChangesAsync(ct);
-            
-            // Cache'ni qo'lda invalidate qilish
-            var cacheKey = CacheKeyBuilder.Build(
-                typeof(ITodoService),
-                nameof(GetTodoByIdAsync),
-                new GetTodoByIdQuery(cmd.Id));
-            cache.Remove(cacheKey);
-        }
-        return todo;
-    }
-}
+[QueryHandler(CacheTtlSeconds = 300)]  // Cache for 5 minutes
+Task<List<Product>> GetProducts(GetProductsQuery query, CancellationToken ct = default);
+```
+
+## Migration from v1.0.6
+
+If upgrading from v1.0.6 or earlier:
+
+**Old:**
+```csharp
+cache.Remove(cacheKey);  // Manual cache key management
+```
+
+**New:**
+```csharp
+_commandor.Invalidate<IYourService>();  // Service-level invalidation
+```
+
+## License
+
+MIT

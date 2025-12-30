@@ -1,29 +1,11 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using Commandor;
+using Microsoft.EntityFrameworkCore;
 using WebApplication1.Data;
 
 namespace WebApplication1.Features;
 
-public class TodoService(AppDbContext dbContext) : ITodoService
+public class TodoService(AppDbContext dbContext, ICommandor commandor) : ITodoService
 {
-    public virtual async Task<Todo> CreateTodoAsync(CreateTodoCommand command, CancellationToken ct = default)
-    {
-        var todo = new Todo { Title = command.Title };
-        dbContext.Todos.Add(todo);
-        await dbContext.SaveChangesAsync(ct);
-        return todo;
-    }
-
-    public virtual async Task<bool> DeleteTodoAsync(DeleteTodoCommand command, CancellationToken ct = default)
-    {
-        var todo = await dbContext.Todos.FindAsync([command.Id], ct);
-        if (todo == null)
-            return false;
-        
-        dbContext.Todos.Remove(todo);
-        await dbContext.SaveChangesAsync(ct);
-        return true;
-    }
-
     public virtual async Task<List<Todo>> GetAllTodosAsync(GetAllTodosQuery query, CancellationToken ct = default)
     {
         return await dbContext.Todos.ToListAsync(ct);
@@ -34,8 +16,18 @@ public class TodoService(AppDbContext dbContext) : ITodoService
         return await dbContext.Todos.FindAsync([query.Id], ct);
     }
 
+    public virtual async Task<Todo> CreateTodoAsync(CreateTodoCommand command, CancellationToken ct = default)
+    {
+        await InvalidateAsync(ct);
+        var todo = new Todo { Title = command.Title };
+        dbContext.Todos.Add(todo);
+        await dbContext.SaveChangesAsync(ct);
+        return todo;
+    }
+
     public virtual async Task<Todo?> UpdateTodoAsync(UpdateTodoCommand command, CancellationToken ct = default)
     {
+        await InvalidateAsync(ct);
         var todo = await dbContext.Todos.FindAsync([command.Id], ct);
         if (todo == null)
             return null;
@@ -45,4 +37,19 @@ public class TodoService(AppDbContext dbContext) : ITodoService
         await dbContext.SaveChangesAsync(ct);
         return todo;
     }
+
+    public virtual async Task<bool> DeleteTodoAsync(DeleteTodoCommand command, CancellationToken ct = default)
+    {
+        await InvalidateAsync(ct);
+        var todo = await dbContext.Todos.FindAsync([command.Id], ct);
+        if (todo == null)
+            return false;
+        
+        dbContext.Todos.Remove(todo);
+        await dbContext.SaveChangesAsync(ct);
+        return true;
+    }
+
+    public Task InvalidateAsync(CancellationToken cancellationToken = default)
+        => commandor.InvalidateAsync<ITodoService>(cancellationToken);
 }

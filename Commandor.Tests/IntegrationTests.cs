@@ -1,4 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
+using Commandor;
+using Commandor;
 
 namespace Commandor.Tests;
 
@@ -12,8 +14,7 @@ public class IntegrationTests
     {
         // Arrange - Setup complete system
         var services = new ServiceCollection();
-        services.AddSingleton<ICommandor, Commandor>();
-        services.AddSingleton<IComputedCache, CommandorMemoryCache>();
+        services.AddCommandor(typeof(IntegrationTests).Assembly);
         services.AddCommandorService<IntegrationTests.ITestService, IntegrationTests.TestService>();
 
         var serviceProvider = services.BuildServiceProvider();
@@ -43,7 +44,7 @@ public class IntegrationTests
         // 4. Update item
         var updateCmd = new UpdateItemCommand(created.Id, "Updated Item", 200);
         await commandor.SendAsync(updateCmd);
-
+        
         // 5. Query after update (cache invalidated, fresh data)
         var query3 = new GetItemQuery(created.Id);
         var item3 = await commandor.SendAsync(query3);
@@ -57,37 +58,17 @@ public class IntegrationTests
     {
         // Arrange
         var services = new ServiceCollection();
-        services.AddSingleton<ICommandor, Commandor>();
-        services.AddSingleton<IComputedCache, CommandorMemoryCache>();
+        services.AddCommandor(typeof(IntegrationTests).Assembly);
         services.AddCommandorService<ITestService, TestService>();
 
         var serviceProvider = services.BuildServiceProvider();
 
         // Act & Assert - All components should be resolvable
         var commandor = serviceProvider.GetService<ICommandor>();
-        var cache = serviceProvider.GetService<IComputedCache>();
         var service = serviceProvider.GetService<ITestService>();
 
         Assert.NotNull(commandor);
-        Assert.NotNull(cache);
         Assert.NotNull(service);
-    }
-
-    [Fact]
-    public void LiteApiCache_ShouldBeAvailable()
-    {
-        // Arrange & Act
-        var cache = new LiteApiComputedCache();
-
-        // Assert
-        Assert.NotNull(cache);
-        
-        // Test basic operations
-        cache.Set("test-key", "test-value");
-        var value = cache.Get<string>("test-key");
-        Assert.Equal("test-value", value);
-        
-        cache.Remove("test-key");
     }
 
     // Test models
@@ -117,6 +98,12 @@ public class IntegrationTests
     public class TestService : ITestService
     {
         private static readonly List<ItemDto> _items = new();
+        private readonly ICommandor _commandor;
+
+        public TestService(ICommandor commandor)
+        {
+            _commandor = commandor;
+        }
 
         public Task<ItemDto> CreateItem(CreateItemCommand cmd, CancellationToken ct = default)
         {
@@ -138,6 +125,10 @@ public class IntegrationTests
                 item.Name = cmd.Name;
                 item.Value = cmd.Value;
             }
+            
+            // Invalidate cache
+            _commandor.Invalidate<ITestService>();
+            
             return Task.CompletedTask;
         }
 

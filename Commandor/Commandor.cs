@@ -1,3 +1,4 @@
+using System;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Commandor;
@@ -7,11 +8,13 @@ namespace Commandor;
 /// </summary>
 public class Commandor : ICommandor
 {
-    private readonly IServiceScopeFactory _scopeFactory;
+    private readonly IServiceProvider _serviceProvider;
+    private readonly CommandorContext _context;
 
-    public Commandor(IServiceScopeFactory scopeFactory)
+    public Commandor(IServiceProvider serviceProvider, CommandorContext context)
     {
-        _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
+        _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
+        _context = context ?? throw new ArgumentNullException(nameof(context));
     }
 
     /// <summary>
@@ -23,11 +26,8 @@ public class Commandor : ICommandor
         if (request == null)
             throw new ArgumentNullException(nameof(request));
 
-        using var scope = _scopeFactory.CreateScope();
-        var serviceProvider = scope.ServiceProvider;
-
         var handlerType = typeof(IRequestHandler<>).MakeGenericType(typeof(TRequest));
-        var handler = serviceProvider.GetService(handlerType);
+        var handler = _serviceProvider.GetService(handlerType);
 
         if (handler == null)
             throw new InvalidOperationException($"Handler topilmadi: {typeof(TRequest).Name}");
@@ -48,12 +48,9 @@ public class Commandor : ICommandor
         if (request == null)
             throw new ArgumentNullException(nameof(request));
 
-        using var scope = _scopeFactory.CreateScope();
-        var serviceProvider = scope.ServiceProvider;
-
         var requestType = request.GetType();
         var handlerType = typeof(IRequestHandler<,>).MakeGenericType(requestType, typeof(TResponse));
-        var handler = serviceProvider.GetService(handlerType);
+        var handler = _serviceProvider.GetService(handlerType);
 
         if (handler == null)
             throw new InvalidOperationException($"Handler topilmadi: {requestType.Name}");
@@ -64,5 +61,16 @@ public class Commandor : ICommandor
 
         var task = (Task<TResponse>)method.Invoke(handler, new object[] { request, cancellationToken })!;
         return await task.ConfigureAwait(false);
+    }
+
+    public void Invalidate<TService>()
+    {
+        _context.Invalidate(typeof(TService));
+    }
+
+    public Task InvalidateAsync<TService>(CancellationToken cancellationToken = default)
+    {
+        Invalidate<TService>();
+        return Task.CompletedTask;
     }
 }

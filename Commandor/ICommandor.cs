@@ -22,4 +22,16 @@ public interface ICommandor
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>Javob obyekti</returns>
     Task<TResponse> SendAsync<TResponse>(IRequest<TResponse> request, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Servisga tegishli barcha keshlarni tozalash (Invalidate).
+    /// </summary>
+    /// <typeparam name="TService">Servis interfeysi (masalan IUserService)</typeparam>
+    void Invalidate<TService>();
+
+    /// <summary>
+    /// Servisga tegishli barcha keshlarni tozalash (Asinxron wrapper).
+    /// </summary>
+    /// <typeparam name="TService">Servis interfeysi</typeparam>
+    Task InvalidateAsync<TService>(CancellationToken cancellationToken = default);
 }

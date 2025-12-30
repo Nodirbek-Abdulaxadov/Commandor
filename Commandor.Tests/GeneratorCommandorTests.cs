@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Commandor.Tests.GeneratorTests;
+using Commandor;
 
 namespace Commandor.Tests;
 

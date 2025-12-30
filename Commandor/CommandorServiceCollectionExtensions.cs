@@ -1,6 +1,7 @@
 using System;
 using System.Reflection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Microsoft.Extensions.DependencyInjection;
 
@@ -15,16 +16,20 @@ public static class CommandorServiceCollectionExtensions
     /// <param name="services">Service collection</param>
     /// <param name="assemblies">Handlerlar joylashgan assemblylar</param>
     /// <returns>Service collection</returns>
+    /// <summary>
+    /// Commandorni va handlerlarni DI containerga qo'shish
+    /// </summary>
+    /// <param name="services">Service collection</param>
+    /// <param name="assemblies">Handlerlar joylashgan assemblylar</param>
+    /// <returns>Service collection</returns>
     public static IServiceCollection AddCommandor(this IServiceCollection services, params Assembly[] assemblies)
     {
-        // Commandorni singleton sifatida qo'shish
-        services.AddSingleton<global::Commandor.ICommandor, global::Commandor.Commandor>();
-        services.TryAddSingleton<global::Commandor.IComputedCache>(_ =>
-        {
-            var cache = CreateDefaultCache();
-            global::Commandor.ServiceCacheRegistry.TrackCache(cache);
-            return cache;
-        });
+        // Commandorni va Contextni singleton sifatida qo'shish
+        services.AddSingleton<global::Commandor.CommandorContext>();
+        services.AddScoped<global::Commandor.ICommandor, global::Commandor.Commandor>();
+        
+        // MemoryCache ni qo'shish (agar oldin qo'shilmagan bo'lsa)
+        services.AddMemoryCache();
 
         // Agar assemblylar berilmagan bo'lsa, chaqiruvchi assemblyni ishlatish
         var assembliesToScan = assemblies.Length > 0
@@ -138,21 +143,5 @@ public static class CommandorServiceCollectionExtensions
                 services.AddTransient(handlerInterface, handlerType);
             }
         }
-    }
-
-    private static global::Commandor.IComputedCache CreateDefaultCache()
-    {
-        try
-        {
-            return new global::Commandor.LiteApiComputedCache();
-        }
-        catch (DllNotFoundException)
-        {
-        }
-        catch (TypeInitializationException ex) when (ex.InnerException is DllNotFoundException)
-        {
-        }
-
-        return new global::Commandor.CommandorMemoryCache();
     }
 }

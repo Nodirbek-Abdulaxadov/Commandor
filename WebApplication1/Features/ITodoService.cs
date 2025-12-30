@@ -18,4 +18,6 @@ public interface ITodoService : ICommandorService
     
     [QueryHandler]
     Task<Todo?> GetTodoByIdAsync(GetTodoByIdQuery query, CancellationToken ct = default);
+
+    Task InvalidateAsync(CancellationToken cancellationToken = default);
 }

@@ -1,297 +1,95 @@
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
+using Commandor;
 
 namespace Commandor.Tests;
 
-/// <summary>
-/// Tests for caching mechanism (Fusion pattern).
-/// </summary>
 public class CachingTests
 {
-    [Fact]
-    public void CacheKeyBuilder_WithPrimitives_ShouldBuildCorrectKey()
+    private readonly IServiceProvider _serviceProvider;
+    private readonly ICommandor _commandor;
+    private readonly ITestService _service;
+
+    public CachingTests()
     {
-        // Arrange & Act
-        var key = CacheKeyBuilder.Build(typeof(TestService), "GetProduct", 123, "test");
-
-        // Assert
-        Assert.Equal("TestService.GetProduct(123, \"test\")", key);
-    }
-
-    [Fact]
-    public void CacheKeyBuilder_WithNull_ShouldHandleNull()
-    {
-        // Arrange & Act
-        var key = CacheKeyBuilder.Build(typeof(TestService), "GetProduct", null, 123);
-
-        // Assert
-        Assert.Equal("TestService.GetProduct(null, 123)", key);
-    }
-
-    [Fact]
-    public void CacheKeyBuilder_WithComplexObject_ShouldSerializeToJson()
-    {
-        // Arrange
-        var obj = new { Id = 1, Name = "Test" };
-
-        // Act
-        var key = CacheKeyBuilder.Build(typeof(TestService), "GetProduct", obj);
-
-        // Assert
-        Assert.Contains("TestService.GetProduct", key);
-        Assert.Contains("\"Id\":1", key);
-        Assert.Contains("\"Name\":\"Test\"", key);
-    }
-
-    [Fact]
-    public void CommandorMemoryCache_SetAndGet_ShouldWork()
-    {
-        // Arrange
-        var cache = new CommandorMemoryCache();
-        var key = "test-key";
-        var value = "test-value";
-
-        // Act
-        cache.Set(key, value);
-        var result = cache.Get<string>(key);
-
-        // Assert
-        Assert.Equal(value, result);
-    }
-
-    [Fact]
-    public void CommandorMemoryCache_GetNonExistent_ShouldReturnDefault()
-    {
-        // Arrange
-        var cache = new CommandorMemoryCache();
-
-        // Act
-        var result = cache.Get<string>("non-existent");
-
-        // Assert
-        Assert.Null(result);
-    }
-
-    [Fact]
-    public void CommandorMemoryCache_Remove_ShouldRemoveItem()
-    {
-        // Arrange
-        var cache = new CommandorMemoryCache();
-        var key = "test-key";
-        cache.Set(key, "test-value");
-
-        // Act
-        cache.Remove(key);
-        var result = cache.Get<string>(key);
-
-        // Assert
-        Assert.Null(result);
-    }
-
-    [Fact]
-    public void CommandorMemoryCache_Clear_ShouldRemoveAllItems()
-    {
-        // Arrange
-        var cache = new CommandorMemoryCache();
-        cache.Set("key1", "value1");
-        cache.Set("key2", "value2");
-        cache.Set("key3", "value3");
-
-        // Act
-        cache.Clear();
-
-        // Assert
-        Assert.Equal(0, cache.Count);
-        Assert.Null(cache.Get<string>("key1"));
-        Assert.Null(cache.Get<string>("key2"));
-        Assert.Null(cache.Get<string>("key3"));
-    }
-
-    [Fact]
-    public void Computed_Create_ShouldInitializeCorrectly()
-    {
-        // Arrange & Act
-        var computed = new Computed<string>("test-key", "test-value");
-
-        // Assert
-        Assert.True(computed.Version > 0);
-        Assert.Equal("test-key", computed.CacheKey);
-        Assert.Equal("test-value", computed.Value);
-        Assert.True(computed.HasValue);
-        Assert.False(computed.HasError);
-        Assert.True(computed.IsConsistent());
-    }
-
-    [Fact]
-    public void Computed_CreateWithError_ShouldStoreError()
-    {
-        // Arrange
-        var error = new InvalidOperationException("Test error");
-
-        // Act
-        var computed = new Computed<string>("test-key", error);
-
-        // Assert
-        Assert.Null(computed.Value);
-        Assert.Equal(error, computed.Error);
-        Assert.False(computed.HasValue);
-        Assert.True(computed.HasError);
-    }
-
-    [Fact]
-    public void Computed_Invalidate_ShouldChangeState()
-    {
-        // Arrange
-        var computed = new Computed<string>("test-key", "test-value");
-        var invalidated = false;
-        computed.Invalidated += _ => invalidated = true;
-
-        // Act
-        computed.Invalidate();
-
-        // Assert
-        Assert.False(computed.IsConsistent());
-        Assert.Equal(ConsistencyState.Invalidated, computed.ConsistencyState);
-        Assert.True(invalidated);
-    }
-
-    [Fact]
-    public async Task Computed_WhenInvalidated_ShouldCompleteOnInvalidation()
-    {
-        // Arrange
-        var computed = new Computed<string>("test-key", "test-value");
-        var task = computed.WhenInvalidated();
-
-        // Act
-        computed.Invalidate();
-        await task;
-
-        // Assert
-        Assert.True(task.IsCompleted);
-    }
-
-    [Fact]
-    public void ComputedRegistry_RegisterAndGet_ShouldWork()
-    {
-        // Arrange
-        var computed = new Computed<string>("registry-test", "value");
-        ComputedRegistry.Clear(); // Clean state
-
-        // Act
-        ComputedRegistry.Register(computed);
-        var retrieved = ComputedRegistry.Get<string>("registry-test");
-
-        // Assert
-        Assert.NotNull(retrieved);
-        Assert.Equal(computed.CacheKey, retrieved.CacheKey);
-        Assert.Equal(computed.Value, retrieved.Value);
+        var services = new ServiceCollection();
+        services.AddCommandor(typeof(CachingTests).Assembly);
+        services.AddCommandorService<ITestService, TestService>();
         
-        // Cleanup
-        ComputedRegistry.Clear();
-    }
-
-    [Fact]
-    public void ComputedRegistry_Remove_ShouldRemoveComputed()
-    {
-        // Arrange
-        var computed = new Computed<string>("remove-test", "value");
-        ComputedRegistry.Clear();
-        ComputedRegistry.Register(computed);
-
-        // Act
-        ComputedRegistry.Remove("remove-test");
-        var retrieved = ComputedRegistry.Get<string>("remove-test");
-
-        // Assert
-        Assert.Null(retrieved);
+        _serviceProvider = services.BuildServiceProvider();
+        _commandor = _serviceProvider.GetRequiredService<ICommandor>();
+        _service = _serviceProvider.GetRequiredService<ITestService>();
         
-        // Cleanup
-        ComputedRegistry.Clear();
+        TestService.Reset();
     }
 
     [Fact]
-    public void ServiceCacheRegistry_InvalidateService_ShouldRemoveEntries()
+    public async Task SendAsync_ShouldCacheResult()
     {
         // Arrange
-        ServiceCacheRegistry.InvalidateAll();
-        var cache = new CommandorMemoryCache();
-        var key = "DummyService.Method(1)";
-
-        ServiceCacheRegistry.Register(typeof(DummyService), key, "v1", cache);
-        cache.Set(key, new CacheEnvelope<string> { HasValue = true, Value = "v1" });
+        var query = new GetDataQuery(1);
 
         // Act
-        var found = ServiceCacheRegistry.TryGet<string>(typeof(DummyService), key, out ServiceComputed<string>? computedBefore);
-        Assert.True(found);
-        Assert.NotNull(computedBefore);
-        Assert.True(computedBefore!.IsConsistent());
-        Assert.True(computedBefore.HasValue);
-
-        ServiceCacheRegistry.InvalidateService(typeof(DummyService));
+        var result1 = await _commandor.SendAsync(query);
+        var result2 = await _commandor.SendAsync(query);
 
         // Assert
-        var stillThere = ServiceCacheRegistry.TryGet<string>(typeof(DummyService), key, out _);
-        Assert.False(stillThere);
-        Assert.Null(cache.Get<CacheEnvelope<string>>(key));
-        Assert.Equal(ConsistencyState.Invalidated, computedBefore.ConsistencyState);
+        Assert.Equal(result1, result2);
+        Assert.Equal(1, TestService.CallCount);
     }
 
     [Fact]
-    public void ServiceCacheRegistry_InvalidateAll_ShouldClearAllServices()
+    public async Task Invalidate_ShouldClearCache()
     {
         // Arrange
-        ServiceCacheRegistry.InvalidateAll();
-        var cache = new CommandorMemoryCache();
-        var key1 = "DummyService.Method(1)";
-        var key2 = "AnotherService.Method(2)";
-
-        ServiceCacheRegistry.Register<string>(typeof(DummyService), key1, "v1", cache);
-        cache.Set(key1, new CacheEnvelope<string> { HasValue = true, Value = "v1" });
-        ServiceCacheRegistry.Register<string>(typeof(AnotherService), key2, "v2", cache);
-        cache.Set(key2, new CacheEnvelope<string> { HasValue = true, Value = "v2" });
+        var query = new GetDataQuery(1);
+        await _commandor.SendAsync(query);
+        Assert.Equal(1, TestService.CallCount);
 
         // Act
-        ServiceCacheRegistry.InvalidateAll();
+        _commandor.Invalidate<ITestService>();
+        await _commandor.SendAsync(query);
 
         // Assert
-        Assert.Null(cache.Get<CacheEnvelope<string>>(key1));
-        Assert.Null(cache.Get<CacheEnvelope<string>>(key2));
-        Assert.False(ServiceCacheRegistry.TryGet<string>(typeof(DummyService), key1, out _));
-        Assert.False(ServiceCacheRegistry.TryGet<string>(typeof(AnotherService), key2, out _));
+        Assert.Equal(2, TestService.CallCount);
     }
-
-    [Fact]
-    public void LiteApiComputedCache_SetAndGet_ShouldWork()
-    {
-        // Arrange
-        var cache = new LiteApiComputedCache();
-        var key = "liteapi-test-key";
-        var value = new TestProduct { Id = 1, Name = "Test Product", Price = 1000 };
-
-        // Act
-        cache.Set(key, value);
-        var result = cache.Get<TestProduct>(key);
-
-        // Assert
-        Assert.NotNull(result);
-        Assert.Equal(value.Id, result.Id);
-        Assert.Equal(value.Name, result.Name);
-        Assert.Equal(value.Price, result.Price);
-        
-        // Cleanup
-        cache.Remove(key);
-    }
-
-    // Helper classes
-    private class TestService { }
     
-    private class TestProduct
+    [Fact]
+    public async Task InvalidateAsync_ShouldClearCache()
     {
-        public int Id { get; set; }
-        public string Name { get; set; } = string.Empty;
-        public decimal Price { get; set; }
+        // Arrange
+        var query = new GetDataQuery(1);
+        await _commandor.SendAsync(query);
+        Assert.Equal(1, TestService.CallCount);
+
+        // Act
+        await _commandor.InvalidateAsync<ITestService>();
+        await _commandor.SendAsync(query);
+
+        // Assert
+        Assert.Equal(2, TestService.CallCount);
     }
 
-    private class DummyService { }
+    // --- Helpers ---
 
-    private class AnotherService { }
+    public record GetDataQuery(int Id) : IRequest<string>;
+
+    public interface ITestService : ICommandorService
+    {
+        [QueryHandler(CacheTtlSeconds = 60)]
+        Task<string> GetData(GetDataQuery query, CancellationToken ct = default);
+    }
+
+    public class TestService : ITestService
+    {
+        public static int CallCount = 0;
+
+        public static void Reset() => CallCount = 0;
+
+        public Task<string> GetData(GetDataQuery query, CancellationToken ct = default)
+        {
+            Interlocked.Increment(ref CallCount);
+            return Task.FromResult($"Result-{query.Id}-{Guid.NewGuid()}");
+        }
+    }
 }

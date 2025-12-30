@@ -126,13 +126,24 @@ public class CommandHandlerGenerator : ISourceGenerator
             sb.AppendLine("    {");
             sb.AppendLine($"        private readonly {interfaceTypeName} _service;");
             if (isQueryHandler)
-                sb.AppendLine("        private readonly global::Commandor.IComputedCache _cache;");
+            {
+                sb.AppendLine("        private readonly global::Microsoft.Extensions.Caching.Memory.IMemoryCache _cache;");
+                sb.AppendLine("        private readonly global::Commandor.CommandorContext _context;");
+            }
             sb.AppendLine();
-            sb.AppendLine($"        public {handlerName}({interfaceTypeName} service{(isQueryHandler ? ", global::Commandor.IComputedCache cache" : string.Empty)})");
+            
+            var constructorArgs = isQueryHandler 
+                ? $"{interfaceTypeName} service, global::Microsoft.Extensions.Caching.Memory.IMemoryCache cache, global::Commandor.CommandorContext context"
+                : $"{interfaceTypeName} service";
+
+            sb.AppendLine($"        public {handlerName}({constructorArgs})");
             sb.AppendLine("        {");
             sb.AppendLine("            _service = service ?? throw new global::System.ArgumentNullException(nameof(service));");
             if (isQueryHandler)
+            {
                 sb.AppendLine("            _cache = cache ?? throw new global::System.ArgumentNullException(nameof(cache));");
+                sb.AppendLine("            _context = context ?? throw new global::System.ArgumentNullException(nameof(context));");
+            }
             sb.AppendLine("        }");
             sb.AppendLine();
             sb.AppendLine($"        public async global::System.Threading.Tasks.Task<{responseTypeName}> HandleAsync({requestTypeName} request, global::System.Threading.CancellationToken cancellationToken = default)");
@@ -140,11 +151,18 @@ public class CommandHandlerGenerator : ISourceGenerator
             if (isQueryHandler)
             {
                 sb.AppendLine($"            var cacheKey = global::Commandor.CacheKeyBuilder.Build(typeof({interfaceTypeName}), \"{method.Name}\", request);");
-                sb.AppendLine($"            var cached = _cache.Get<global::Commandor.CacheEnvelope<{responseTypeName}>>(cacheKey);");
-                sb.AppendLine("            if (cached != null && cached.HasValue)");
-                sb.AppendLine("                return cached.Value;\n");
+                var patternType = responseTypeName?.TrimEnd('?') ?? responseTypeName;
+                sb.AppendLine($"            if (global::Microsoft.Extensions.Caching.Memory.CacheExtensions.TryGetValue(_cache, cacheKey, out object? cachedObj) && cachedObj is {patternType} cachedValue)");
+                sb.AppendLine("            {");
+                sb.AppendLine("                return cachedValue;");
+                sb.AppendLine("            }");
+                sb.AppendLine();
                 sb.AppendLine($"            var result = await _service.{method.Name}(request, cancellationToken).ConfigureAwait(false);");
-                sb.AppendLine($"            _cache.Set(cacheKey, new global::Commandor.CacheEnvelope<{responseTypeName}> {{ HasValue = true, Value = result! }});");
+                sb.AppendLine();
+                sb.AppendLine("            var options = new global::Microsoft.Extensions.Caching.Memory.MemoryCacheEntryOptions();");
+                sb.AppendLine($"            global::Microsoft.Extensions.Caching.Memory.MemoryCacheEntryExtensions.AddExpirationToken(options, _context.GetToken(typeof({interfaceTypeName})));");
+                sb.AppendLine("            global::Microsoft.Extensions.Caching.Memory.CacheExtensions.Set(_cache, cacheKey, result, options);");
+                sb.AppendLine();
                 sb.AppendLine("            return result;");
             }
             else

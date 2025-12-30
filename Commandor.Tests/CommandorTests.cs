@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Commandor.Tests.Examples;
+using Commandor;
 
 namespace Commandor.Tests;
 
@@ -90,9 +91,12 @@ public class CommandorTests
     [Fact]
     public async Task SendAsync_HandlerNotRegistered_ShouldThrowInvalidOperationException()
     {
-        // Arrange
+        // Arrange - Register Commandor without any handlers
         var services = new ServiceCollection();
-        services.AddSingleton<ICommandor, Commandor>();
+        services.AddSingleton<CommandorContext>();
+        services.AddScoped<ICommandor, Commandor>();
+        services.AddMemoryCache();
+        
         var sp = services.BuildServiceProvider();
         var commandor = sp.GetRequiredService<ICommandor>();
 
