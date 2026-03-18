@@ -1,0 +1,94 @@
+name: CI / CD
+
+on:
+  push:
+    branches: [ master, main ]
+    tags:     [ 'v*.*.*' ]
+  pull_request:
+    branches: [ master, main ]
+
+permissions:
+  contents: read
+
+jobs:
+  # ── Build & Test ──────────────────────────────────────────────────────────
+  build-and-test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET (8, 9, 10)
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.x
+            9.x
+            10.x
+
+      - name: Restore
+        run: dotnet restore Commandor.sln
+
+      - name: Build
+        run: dotnet build Commandor.sln -c Release --no-restore
+
+      - name: Test
+        run: >
+          dotnet test Commandor.Tests/Commandor.Tests.csproj
+          -c Release --no-build --no-restore
+          --logger "console;verbosity=normal"
+
+  # ── Pack & Publish to NuGet ───────────────────────────────────────────────
+  # Runs only when a version tag   (e.g. v1.2.0)   is pushed.
+  # Required GitHub secret:  NUGET_API_KEY
+  publish:
+    name: Pack & Publish to NuGet
+    needs: build-and-test
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET (8, 9)
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.x
+            9.x
+
+      # Derive version number from the tag (strips leading 'v')
+      # Tag  v1.2.3  →  VERSION=1.2.3
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Restore
+        run: dotnet restore Commandor.sln
+
+      # Build everything with the tag-derived version
+      - name: Build
+        run: >
+          dotnet build Commandor.sln -c Release --no-restore
+          /p:Version=${{ steps.version.outputs.VERSION }}
+
+      # Pack the main ICommandor package (bundles the generator DLL inside).
+      # Note: --no-build is intentionally omitted because the PackGenerator MSBuild
+      # target rebuilds Commandor.Generators.dll as part of the pack pipeline.
+      - name: Pack ICommandor
+        run: >
+          dotnet pack Commandor/Commandor.csproj
+          -c Release --no-restore
+          /p:Version=${{ steps.version.outputs.VERSION }}
+          -o ./artifacts
+
+      # Push all produced .nupkg files to NuGet.org
+      - name: Push to NuGet.org
+        run: >
+          dotnet nuget push ./artifacts/*.nupkg
+          --api-key ${{ secrets.NUGET_API_KEY }}
+          --source https://api.nuget.org/v3/index.json
+          --skip-duplicate

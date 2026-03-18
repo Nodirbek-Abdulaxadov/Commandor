@@ -40,13 +40,14 @@ public class TodosController(ICommandor commandor) : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetTodoById(int id)
     {
-        var todo = await commandor.SendAsync(new GetTodoByIdQuery(id));
+        // Plain-type extension method — no IRequest wrapper needed at the call site.
+        var todo = await commandor.GetTodoByIdAsync(id);
         if (todo == null)
             return NotFound();
-        
+
         return Ok(todo);
     }
-    
+
     /// <summary>
     /// Get all todo items
     /// </summary>
@@ -56,7 +57,8 @@ public class TodosController(ICommandor commandor) : ControllerBase
     [ProducesResponseType(typeof(List<Todo>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetAllTodos()
     {
-        var todos = await commandor.SendAsync(new GetAllTodosQuery());
+        // Generated IRequest-mode extension: commandor.GetAllTodosAsync(query)
+        var todos = await commandor.GetAllTodosAsync(new GetAllTodosQuery());
         return Ok(todos);
     }
     

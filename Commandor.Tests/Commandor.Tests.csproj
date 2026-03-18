@@ -16,7 +16,14 @@
 		<PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
 		<PackageReference Include="xunit" Version="2.5.3" />
 		<PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />
-		<PackageReference Include="ICommandor" Version="1.0.53" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<!-- Use local project so the updated generator runs on test interfaces. -->
+		<ProjectReference Include="..\Commandor\Commandor.csproj" />
+		<ProjectReference Include="..\Commandor.Generators\Commandor.Generators.csproj"
+		                  ReferenceOutputAssembly="false"
+		                  OutputItemType="Analyzer" />
 	</ItemGroup>
 
 	<ItemGroup>

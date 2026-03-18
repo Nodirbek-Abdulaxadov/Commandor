@@ -11,14 +11,14 @@ public class TodoService(AppDbContext dbContext, ICommandor commandor) : ITodoSe
         return await dbContext.Todos.ToListAsync(ct);
     }
 
-    public virtual async Task<Todo?> GetTodoByIdAsync(GetTodoByIdQuery query, CancellationToken ct = default)
+    public virtual async Task<Todo?> GetTodoByIdAsync(int id, CancellationToken ct = default)
     {
-        return await dbContext.Todos.FindAsync([query.Id], ct);
+        return await dbContext.Todos.FindAsync([id], ct);
     }
 
     public virtual async Task<Todo> CreateTodoAsync(CreateTodoCommand command, CancellationToken ct = default)
     {
-        await InvalidateAsync(ct);
+        await commandor.InvalidateAsync<ITodoService>(ct);
         var todo = new Todo { Title = command.Title };
         dbContext.Todos.Add(todo);
         await dbContext.SaveChangesAsync(ct);
@@ -27,7 +27,7 @@ public class TodoService(AppDbContext dbContext, ICommandor commandor) : ITodoSe
 
     public virtual async Task<Todo?> UpdateTodoAsync(UpdateTodoCommand command, CancellationToken ct = default)
     {
-        await InvalidateAsync(ct);
+        await commandor.InvalidateAsync<ITodoService>(ct);
         var todo = await dbContext.Todos.FindAsync([command.Id], ct);
         if (todo == null)
             return null;
@@ -40,7 +40,7 @@ public class TodoService(AppDbContext dbContext, ICommandor commandor) : ITodoSe
 
     public virtual async Task<bool> DeleteTodoAsync(DeleteTodoCommand command, CancellationToken ct = default)
     {
-        await InvalidateAsync(ct);
+        await commandor.InvalidateAsync<ITodoService>(ct);
         var todo = await dbContext.Todos.FindAsync([command.Id], ct);
         if (todo == null)
             return false;
@@ -49,7 +49,4 @@ public class TodoService(AppDbContext dbContext, ICommandor commandor) : ITodoSe
         await dbContext.SaveChangesAsync(ct);
         return true;
     }
-
-    public Task InvalidateAsync(CancellationToken cancellationToken = default)
-        => commandor.InvalidateAsync<ITodoService>(cancellationToken);
 }

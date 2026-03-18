@@ -11,13 +11,7 @@ namespace Microsoft.Extensions.DependencyInjection;
 public static class CommandorServiceCollectionExtensions
 {
     /// <summary>
-    /// Commandorni va handlerlarni DI containerga qo'shish
-    /// </summary>
-    /// <param name="services">Service collection</param>
-    /// <param name="assemblies">Handlerlar joylashgan assemblylar</param>
-    /// <returns>Service collection</returns>
-    /// <summary>
-    /// Commandorni va handlerlarni DI containerga qo'shish
+    /// Commandorni va handlerlarni DI containerga qo'shish.
     /// </summary>
     /// <param name="services">Service collection</param>
     /// <param name="assemblies">Handlerlar joylashgan assemblylar</param>
@@ -27,23 +21,25 @@ public static class CommandorServiceCollectionExtensions
         // Commandorni va Contextni singleton sifatida qo'shish
         services.AddSingleton<global::Commandor.CommandorContext>();
         services.AddScoped<global::Commandor.ICommandor, global::Commandor.Commandor>();
-        
+
         // MemoryCache ni qo'shish (agar oldin qo'shilmagan bo'lsa)
         services.AddMemoryCache();
 
-        // Agar assemblylar berilmagan bo'lsa, chaqiruvchi assemblyni ishlatish
-        var assembliesToScan = assemblies.Length > 0
-            ? assemblies
-            : new[] { Assembly.GetCallingAssembly() };
-
-        // Handlerlarni topish va ro'yxatga olish
-        foreach (var assembly in assembliesToScan)
+        foreach (var assembly in assemblies)
         {
             RegisterHandlers(services, assembly);
         }
 
         return services;
     }
+
+    /// <summary>
+    /// Commandorni va handlerlarni qo'shish, TMarker assemblysi skanerlanadi.
+    /// Bu usul AddCommandor() ning ishonchli muqobilidir, chunki u GetCallingAssembly() ga tayanmaydi.
+    /// </summary>
+    /// <typeparam name="TMarker">Skanerlanadigan assemblydan istalgan tip</typeparam>
+    public static IServiceCollection AddCommandor<TMarker>(this IServiceCollection services)
+        => services.AddCommandor(typeof(TMarker).Assembly);
 
     /// <summary>
     /// Commandor service'ni va uning handlerlarini qo'shish
@@ -56,12 +52,8 @@ public static class CommandorServiceCollectionExtensions
         where TService : class, global::Commandor.ICommandorService
         where TImplementation : class, TService
     {
-        // Service'ni qo'shish
         services.AddScoped<TService, TImplementation>();
-
-        // Auto-generated handlerlarni qo'shish
         RegisterGeneratedHandlers<TService>(services);
-
         return services;
     }
 
@@ -87,7 +79,8 @@ public static class CommandorServiceCollectionExtensions
         {
             foreach (var @interface in handlerType.Interfaces)
             {
-                services.AddTransient(@interface, handlerType.ImplementationType);
+                // Fix #11: TryAddTransient prevents double-registration when AddCommandorService is also called.
+                services.TryAddTransient(@interface, handlerType.ImplementationType);
             }
         }
 
@@ -108,30 +101,30 @@ public static class CommandorServiceCollectionExtensions
         {
             foreach (var @interface in handlerType.Interfaces)
             {
-                services.AddTransient(@interface, handlerType.ImplementationType);
+                // Fix #11: TryAddTransient prevents double-registration.
+                services.TryAddTransient(@interface, handlerType.ImplementationType);
             }
         }
     }
 
     /// <summary>
-    /// Auto-generated handlerlarni ro'yxatga olish
+    /// Auto-generated handlerlarni ro'yxatga olish.
+    /// Fix #8: uses [GeneratedHandler] attribute for precise discovery instead of the fragile
+    /// name-ends-with-"Handler" heuristic that could match unrelated classes.
     /// </summary>
     private static void RegisterGeneratedHandlers<TService>(IServiceCollection services)
     {
         var serviceType = typeof(TService);
         var assembly = serviceType.Assembly;
 
-        // Service namespace'dagi barcha auto-generated handlerlarni topish
         var handlerTypes = assembly.GetTypes()
             .Where(t => t.IsClass &&
                        !t.IsAbstract &&
-                       t.Namespace == serviceType.Namespace &&
-                       t.Name.EndsWith("Handler"))
+                       t.IsDefined(typeof(global::Commandor.GeneratedHandlerAttribute), false))
             .ToList();
 
         foreach (var handlerType in handlerTypes)
         {
-            // Handler'ning implement qilgan interfeyslari
             var handlerInterfaces = handlerType.GetInterfaces()
                 .Where(i => i.IsGenericType &&
                            (i.GetGenericTypeDefinition() == typeof(global::Commandor.IRequestHandler<>) ||
@@ -140,7 +133,8 @@ public static class CommandorServiceCollectionExtensions
 
             foreach (var handlerInterface in handlerInterfaces)
             {
-                services.AddTransient(handlerInterface, handlerType);
+                // Fix #11: TryAddTransient prevents double-registration if both AddCommandor + AddCommandorService are called.
+                services.TryAddTransient(handlerInterface, handlerType);
             }
         }
     }

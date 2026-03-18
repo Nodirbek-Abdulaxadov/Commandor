@@ -7,7 +7,10 @@
   </PropertyGroup>
 	
   <ItemGroup>
-    <PackageReference Include="ICommandor" Version="1.1.0" />
+    <ProjectReference Include="..\Commandor\Commandor.csproj" />
+    <ProjectReference Include="..\Commandor.Generators\Commandor.Generators.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.1" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.1">
       <PrivateAssets>all</PrivateAssets>

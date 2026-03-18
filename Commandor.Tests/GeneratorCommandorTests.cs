@@ -70,42 +70,87 @@ public class GeneratorCommandorTests
     [Fact]
     public async Task SendAsync_QueryHandler_ShouldAutoGenerateHandler()
     {
-        // Arrange - ensure we have a product first
         var createCmd = new CreateProductCommand("Test Product", 1000, 5);
         var created = await _commandor.SendAsync(createCmd);
-        
-        var query = new GetProductByIdQuery(created.Id);
 
-        // Act
-        var product = await _commandor.SendAsync(query);
+        var product = await _commandor.SendAsync(new GetProductByIdQuery(created.Id));
 
-        // Assert
         Assert.NotNull(product);
         Assert.Equal("Test Product", product.Name);
         Assert.Equal(created.Id, product.Id);
     }
-    
+
     [Fact]
     public async Task SendAsync_QueryHandler_ShouldSupportCaching()
     {
-        // Arrange
         var createCmd = new CreateProductCommand("Cached Product", 2000, 10);
         var created = await _commandor.SendAsync(createCmd);
-        
         var query = new GetProductByIdQuery(created.Id);
 
-        // Act - First call
         var product1 = await _commandor.SendAsync(query);
-        
-        // Act - Second call (should be served from cache)
-        var product2 = await _commandor.SendAsync(query);
+        var product2 = await _commandor.SendAsync(query); // from cache
 
-        // Assert
         Assert.NotNull(product1);
         Assert.NotNull(product2);
         Assert.Equal(product1.Id, product2.Id);
-        Assert.Equal(product1.Name, product2.Name);
-        Assert.Equal(product1.Price, product2.Price);
+        Assert.Equal(1, ProductService.GetProductByIdCallCount);
+    }
+
+    // ── GetAsync (semantic alias for queries) ─────────────────────────────────
+
+    [Fact]
+    public async Task GetAsync_QueryHandler_ShouldWork()
+    {
+        var created = await _commandor.SendAsync(new CreateProductCommand("GetAsync Product", 3000, 5));
+
+        // GetAsync is the preferred API for queries
+        var product = await _commandor.GetAsync(new GetProductByIdQuery(created.Id));
+
+        Assert.NotNull(product);
+        Assert.Equal("GetAsync Product", product.Name);
+    }
+
+    [Fact]
+    public async Task GetAsync_ShouldShareCacheWithSendAsync()
+    {
+        var created = await _commandor.SendAsync(new CreateProductCommand("Shared Cache", 500, 2));
+        var query = new GetProductByIdQuery(created.Id);
+
+        // Prime cache via SendAsync
+        var r1 = await _commandor.SendAsync(query);
+        // GetAsync must hit same cache entry
+        var r2 = await _commandor.GetAsync(query);
+
+        Assert.Equal(r1!.Id, r2!.Id);
+        Assert.Equal(1, ProductService.GetProductByIdCallCount);
+    }
+
+    // ── Auto-generated extension methods ─────────────────────────────────────
+    // The source generator emits a typed extension method on ICommandor per
+    // [QueryHandler] method, so callers never need to type the request record.
+
+    [Fact]
+    public async Task ExtensionMethod_GetProductById_ShouldWork()
+    {
+        var created = await _commandor.SendAsync(new CreateProductCommand("Ext Product", 9999, 1));
+
+        // Generated extension: commandor.GetProductById(query) → commandor.GetAsync(query)
+        var product = await _commandor.GetProductById(new GetProductByIdQuery(created.Id));
+
+        Assert.NotNull(product);
+        Assert.Equal("Ext Product", product.Name);
+    }
+
+    [Fact]
+    public async Task ExtensionMethod_ShouldShareCacheWithGetAsync()
+    {
+        var created = await _commandor.SendAsync(new CreateProductCommand("Cache Ext", 100, 1));
+        var query = new GetProductByIdQuery(created.Id);
+
+        var r1 = await _commandor.GetAsync(query);
+        var r2 = await _commandor.GetProductById(query); // same cache key
+
+        Assert.Equal(r1!.Id, r2!.Id);
         Assert.Equal(1, ProductService.GetProductByIdCallCount);
     }
 }

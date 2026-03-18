@@ -24,6 +24,16 @@ public interface ICommandor
     Task<TResponse> SendAsync<TResponse>(IRequest<TResponse> request, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Query natijasini olish — SendAsync ning semantik muqobili,
+    /// faqat o'qish (GET) operatsiyalari uchun mo'ljallangan.
+    /// </summary>
+    /// <typeparam name="TResponse">Javob tipi</typeparam>
+    /// <param name="request">Query request obyekti</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>Javob obyekti</returns>
+    Task<TResponse> GetAsync<TResponse>(IRequest<TResponse> request, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Servisga tegishli barcha keshlarni tozalash (Invalidate).
     /// </summary>
     /// <typeparam name="TService">Servis interfeysi (masalan IUserService)</typeparam>

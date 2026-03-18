@@ -12,10 +12,14 @@
     <IncludeBuildOutput>false</IncludeBuildOutput>
 
     <PackageId>ICommandor.Generators</PackageId>
-    <Version>1.0.15</Version>
-    <Authors>Commandor</Authors>
-    <Description>Source generators for ICommandor.</Description>
+    <Version>1.1.0</Version>
+    <Authors>Nodirbek Abdulaxadov</Authors>
+    <Description>Roslyn incremental source generator for ICommandor — auto-generates handler classes and ICommandor extension methods for [CommandHandler] and [QueryHandler] methods.</Description>
+    <PackageTags>cqrs;mediator;source-generator;roslyn;dotnet</PackageTags>
+    <PackageProjectUrl>https://github.com/Nodirbek-Abdulaxadov/Commandor</PackageProjectUrl>
     <RepositoryUrl>https://github.com/Nodirbek-Abdulaxadov/Commandor</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
   </PropertyGroup>
 
   <ItemGroup>
