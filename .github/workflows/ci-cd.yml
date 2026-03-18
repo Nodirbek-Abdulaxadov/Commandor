@@ -67,13 +67,15 @@ jobs:
         run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
 
       - name: Restore
-        run: dotnet restore Commandor.sln
+        run: |
+          dotnet restore Commandor/Commandor.csproj
+          dotnet restore Commandor.Generators/Commandor.Generators.csproj
 
-      # Build everything with the tag-derived version
+      # Build only the library projects (WebApplication1 is not needed for publishing)
       - name: Build
-        run: >
-          dotnet build Commandor.sln -c Release --no-restore
-          /p:Version=${{ steps.version.outputs.VERSION }}
+        run: |
+          dotnet build Commandor.Generators/Commandor.Generators.csproj -c Release --no-restore /p:Version=${{ steps.version.outputs.VERSION }}
+          dotnet build Commandor/Commandor.csproj -c Release --no-restore /p:Version=${{ steps.version.outputs.VERSION }}
 
       # Pack the main ICommandor package (bundles the generator DLL inside).
       # Note: --no-build is intentionally omitted because the PackGenerator MSBuild
