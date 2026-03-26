@@ -173,9 +173,6 @@ public class CommandHandlerGenerator : IIncrementalGenerator
         Compilation compilation,
         List<string> extensionMethods)
     {
-        if (method.Parameters.Length == 0)
-            return string.Empty;
-
         var returnType = method.ReturnType;
         if (returnType is not INamedTypeSymbol namedReturnType || namedReturnType.Name != "Task")
             return string.Empty;
@@ -212,8 +209,71 @@ public class CommandHandlerGenerator : IIncrementalGenerator
             .Where(p => !SymbolEqualityComparer.Default.Equals(p.Type, ctType))
             .ToList();
 
+        var hasCancellationTokenParam = method.Parameters
+            .Any(p => SymbolEqualityComparer.Default.Equals(p.Type, ctType));
+
         if (plainParams.Count == 0)
-            return string.Empty;
+        {
+            if (!isQueryHandler || responseType == null || responseTypeName == null)
+                return string.Empty;
+
+            var noArgWrapperName = $"{method.Name}Request";
+            var handlerNameNoArg = $"{servicePrefix}{method.Name}{noArgWrapperName}Handler";
+            var serviceCall = hasCancellationTokenParam
+                ? $"_service.{method.Name}(cancellationToken)"
+                : $"_service.{method.Name}()";
+
+            var sbNoArg = new StringBuilder();
+            sbNoArg.AppendLine($"    /// <summary>Auto-generated request wrapper for parameterless query <c>{method.Name}</c>.</summary>");
+            sbNoArg.AppendLine($"    internal sealed record {noArgWrapperName}() : global::Commandor.IRequest<{responseTypeName}>;");
+            sbNoArg.AppendLine();
+
+            sbNoArg.AppendLine("    [global::Commandor.GeneratedHandler]");
+            sbNoArg.AppendLine($"    internal sealed class {handlerNameNoArg} : global::Commandor.IRequestHandler<{noArgWrapperName}, {responseTypeName}>");
+            sbNoArg.AppendLine("    {");
+            sbNoArg.AppendLine($"        private readonly {interfaceTypeName} _service;");
+            sbNoArg.AppendLine("        private readonly global::Microsoft.Extensions.Caching.Memory.IMemoryCache _cache;");
+            sbNoArg.AppendLine("        private readonly global::Commandor.CommandorContext _context;");
+            sbNoArg.AppendLine();
+            sbNoArg.AppendLine($"        public {handlerNameNoArg}({interfaceTypeName} service, global::Microsoft.Extensions.Caching.Memory.IMemoryCache cache, global::Commandor.CommandorContext context)");
+            sbNoArg.AppendLine("        {");
+            sbNoArg.AppendLine("            _service = service ?? throw new global::System.ArgumentNullException(nameof(service));");
+            sbNoArg.AppendLine("            _cache = cache ?? throw new global::System.ArgumentNullException(nameof(cache));");
+            sbNoArg.AppendLine("            _context = context ?? throw new global::System.ArgumentNullException(nameof(context));");
+            sbNoArg.AppendLine("        }");
+            sbNoArg.AppendLine();
+            sbNoArg.AppendLine($"        public async global::System.Threading.Tasks.Task<{responseTypeName}> HandleAsync({noArgWrapperName} request, global::System.Threading.CancellationToken cancellationToken = default)");
+            sbNoArg.AppendLine("        {");
+            sbNoArg.AppendLine($"            var cacheKey = global::Commandor.CacheKeyBuilder.Build(typeof({interfaceTypeName}), \"{method.Name}\", request);");
+            sbNoArg.AppendLine($"            if (global::Microsoft.Extensions.Caching.Memory.CacheExtensions.TryGetValue<{responseTypeName}>(_cache, cacheKey, out var cachedValue))");
+            sbNoArg.AppendLine("            {");
+            sbNoArg.AppendLine("                return cachedValue!;");
+            sbNoArg.AppendLine("            }");
+            sbNoArg.AppendLine();
+            sbNoArg.AppendLine($"            var result = await {serviceCall}.ConfigureAwait(false);");
+            sbNoArg.AppendLine();
+            sbNoArg.AppendLine("            var options = new global::Microsoft.Extensions.Caching.Memory.MemoryCacheEntryOptions();");
+            sbNoArg.AppendLine($"            global::Microsoft.Extensions.Caching.Memory.MemoryCacheEntryExtensions.AddExpirationToken(options, _context.GetToken(typeof({interfaceTypeName})));");
+            if (cacheTtlSeconds > 0)
+                sbNoArg.AppendLine($"            options.AbsoluteExpirationRelativeToNow = global::System.TimeSpan.FromSeconds({cacheTtlSeconds});");
+            sbNoArg.AppendLine("            global::Microsoft.Extensions.Caching.Memory.CacheExtensions.Set(_cache, cacheKey, result, options);");
+            sbNoArg.AppendLine();
+            sbNoArg.AppendLine("            return result;");
+            sbNoArg.AppendLine("        }");
+            sbNoArg.AppendLine("    }");
+            sbNoArg.AppendLine();
+
+            var extNoArg = new StringBuilder();
+            extNoArg.AppendLine($"        /// <summary>Queries <c>{interfaceSymbol.Name}.{method.Name}</c> with auto-generated caching. Supports parameterless query methods.</summary>");
+            extNoArg.AppendLine($"        public static global::System.Threading.Tasks.Task<{responseTypeName}> {method.Name}(");
+            extNoArg.AppendLine("            this global::Commandor.ICommandor commandor,");
+            extNoArg.AppendLine("            global::System.Threading.CancellationToken cancellationToken = default)");
+            extNoArg.AppendLine($"            => commandor.GetAsync(new {noArgWrapperName}(), cancellationToken);");
+            extNoArg.AppendLine();
+            extensionMethods.Add(extNoArg.ToString());
+
+            return sbNoArg.ToString();
+        }
 
         var firstParamType = plainParams[0].Type;
         var isIRequestMode = ImplementsIRequest(firstParamType, compilation);

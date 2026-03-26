@@ -153,4 +153,31 @@ public class GeneratorCommandorTests
         Assert.Equal(r1!.Id, r2!.Id);
         Assert.Equal(1, ProductService.GetProductByIdCallCount);
     }
+
+    [Fact]
+    public async Task ExtensionMethod_ParameterlessQuery_WithCancellationTokenOnly_ShouldWorkAndCache()
+    {
+        await _commandor.SendAsync(new CreateProductCommand("P1", 10, 1));
+        await _commandor.SendAsync(new CreateProductCommand("P2", 20, 2));
+
+        var list1 = await _commandor.GetAllProducts();
+        var list2 = await _commandor.GetAllProducts();
+
+        Assert.Equal(2, list1.Count);
+        Assert.Equal(2, list2.Count);
+        Assert.Equal(1, ProductService.GetAllProductsCallCount);
+    }
+
+    [Fact]
+    public async Task ExtensionMethod_ParameterlessQuery_WithNoParameters_ShouldWorkAndCache()
+    {
+        await _commandor.SendAsync(new CreateProductCommand("P3", 30, 3));
+
+        var count1 = await _commandor.GetProductsCount();
+        var count2 = await _commandor.GetProductsCount();
+
+        Assert.Equal(count1, count2);
+        Assert.True(count1 >= 1);
+        Assert.Equal(1, ProductService.GetProductsCountCallCount);
+    }
 }

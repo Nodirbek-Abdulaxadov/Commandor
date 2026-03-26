@@ -39,6 +39,12 @@ public interface IProductService : ICommandorService
 
     [QueryHandler]  // Auto-caching uchun
     Task<ProductDto?> GetProductById(GetProductByIdQuery query, CancellationToken cancellationToken = default);
+
+    [QueryHandler]
+    Task<List<ProductDto>> GetAllProducts(CancellationToken cancellationToken = default);
+
+    [QueryHandler]
+    Task<int> GetProductsCount();
 }
 
 /// <summary>
@@ -48,13 +54,19 @@ public class ProductService : IProductService
 {
     private static readonly List<ProductDto> _products = new();
     private static int _getProductByIdCallCount;
+    private static int _getAllProductsCallCount;
+    private static int _getProductsCountCallCount;
 
     public static int GetProductByIdCallCount => _getProductByIdCallCount;
+    public static int GetAllProductsCallCount => _getAllProductsCallCount;
+    public static int GetProductsCountCallCount => _getProductsCountCallCount;
 
     public static void ResetState()
     {
         _products.Clear();
         System.Threading.Interlocked.Exchange(ref _getProductByIdCallCount, 0);
+        System.Threading.Interlocked.Exchange(ref _getAllProductsCallCount, 0);
+        System.Threading.Interlocked.Exchange(ref _getProductsCountCallCount, 0);
     }
 
     public virtual Task<ProductDto> CreateProduct(CreateProductCommand command, CancellationToken cancellationToken = default)
@@ -86,5 +98,17 @@ public class ProductService : IProductService
         System.Threading.Interlocked.Increment(ref _getProductByIdCallCount);
         var product = _products.FirstOrDefault(p => p.Id == query.ProductId);
         return Task.FromResult(product);
+    }
+
+    public virtual Task<List<ProductDto>> GetAllProducts(CancellationToken cancellationToken = default)
+    {
+        System.Threading.Interlocked.Increment(ref _getAllProductsCallCount);
+        return Task.FromResult(_products.ToList());
+    }
+
+    public virtual Task<int> GetProductsCount()
+    {
+        System.Threading.Interlocked.Increment(ref _getProductsCountCallCount);
+        return Task.FromResult(_products.Count);
     }
 }

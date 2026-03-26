@@ -6,6 +6,11 @@ namespace WebApplication1.Features;
 
 public class TodoService(AppDbContext dbContext, ICommandor commandor) : ITodoService
 {
+    public virtual async Task<List<Todo>> GetAllAsync(CancellationToken ct = default)
+    {
+        return await dbContext.Todos.ToListAsync(ct);
+    }
+
     public virtual async Task<List<Todo>> GetAllTodosAsync(GetAllTodosQuery query, CancellationToken ct = default)
     {
         return await dbContext.Todos.ToListAsync(ct);

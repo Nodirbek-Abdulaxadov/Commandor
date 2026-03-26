@@ -21,4 +21,7 @@ public interface ITodoService : ICommandorService
     // ICommandor extension method:  commandor.GetTodoByIdAsync(id)
     [QueryHandler]
     Task<Todo?> GetTodoByIdAsync(int id, CancellationToken ct = default);
+
+    [QueryHandler]
+    Task<List<Todo>> GetAllAsync(CancellationToken ct = default);
 }
