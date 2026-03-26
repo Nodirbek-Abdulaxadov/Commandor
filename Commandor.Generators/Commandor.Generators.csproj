@@ -12,7 +12,7 @@
     <IncludeBuildOutput>false</IncludeBuildOutput>
 
     <PackageId>ICommandor.Generators</PackageId>
-    <Version>1.1.0</Version>
+    <Version>1.2.0</Version>
     <Authors>Nodirbek Abdulaxadov</Authors>
     <Description>Roslyn incremental source generator for ICommandor — auto-generates handler classes and ICommandor extension methods for [CommandHandler] and [QueryHandler] methods.</Description>
     <PackageTags>cqrs;mediator;source-generator;roslyn;dotnet</PackageTags>

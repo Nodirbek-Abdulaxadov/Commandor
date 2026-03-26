@@ -31,7 +31,7 @@ public interface ITodoService : ICommandorService
     [QueryHandler]
     Task<Todo?> GetTodoByIdAsync(int id, CancellationToken ct = default);
 
-    // IRequest-based query — required when there are no data parameters (empty query).
+    // IRequest-based query — optional. You can also use parameterless queries directly.
     [QueryHandler]
     Task<List<Todo>> GetAllTodosAsync(GetAllTodosQuery query, CancellationToken ct = default);
 }

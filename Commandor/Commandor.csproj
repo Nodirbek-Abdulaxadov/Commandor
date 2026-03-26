@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
     <PackageId>ICommandor</PackageId>
-    <Version>1.1.0</Version>
+    <Version>1.2.0</Version>
     <Authors>Nodirbek Abdulaxadov</Authors>
     <Description>A lightweight CQRS/Mediator library for .NET with automatic caching and Roslyn source generation. Supports plain-type query parameters, GetAsync semantic alias, and auto-generated ICommandor extension methods.</Description>
     <PackageReadmeFile>README.md</PackageReadmeFile>
