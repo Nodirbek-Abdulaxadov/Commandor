@@ -1,21 +1,14 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFrameworks>net8.0;net9.0</TargetFrameworks>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-    <LangVersion>latest</LangVersion>
     <PackageId>ICommandor</PackageId>
-    <Version>1.2.1</Version>
-    <Authors>Nodirbek Abdulaxadov</Authors>
-    <Description>A lightweight CQRS/Mediator library for .NET with automatic caching and Roslyn source generation. Supports plain-type query parameters, GetAsync semantic alias, and auto-generated ICommandor extension methods.</Description>
+    <Description>A lightweight CQRS/Mediator library for .NET with automatic caching and Roslyn source generation. 2.0 adds auto-generated cached proxies — inject the service directly and every [QueryHandler] method is cached transparently, every [CommandHandler] method auto-invalidates.</Description>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageTags>cqrs;mediator;source-generator;caching;dotnet</PackageTags>
-    <PackageProjectUrl>https://github.com/Nodirbek-Abdulaxadov/Commandor</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/Nodirbek-Abdulaxadov/Commandor</RepositoryUrl>
-    <RepositoryType>git</RepositoryType>
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageTags>cqrs;mediator;source-generator;caching;dotnet;proxy;interception</PackageTags>
     <IsPackable>true</IsPackable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
