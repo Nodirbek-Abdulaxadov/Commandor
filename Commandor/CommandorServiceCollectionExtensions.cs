@@ -42,19 +42,62 @@ public static class CommandorServiceCollectionExtensions
         => services.AddCommandor(typeof(TMarker).Assembly);
 
     /// <summary>
-    /// Commandor service'ni va uning handlerlarini qo'shish
+    /// Registers a Commandor service and wires up its auto-generated cached proxy.
+    /// <para>
+    /// When the source generator emits a <c>[GeneratedProxy(typeof(TService))]</c> class
+    /// (the default for any interface with <c>[QueryHandler]</c> / <c>[CommandHandler]</c>
+    /// members), <typeparamref name="TService"/> resolves to that proxy. Every
+    /// <c>[QueryHandler]</c> method is then auto-cached and every
+    /// <c>[CommandHandler]</c> method auto-invalidates the cache — without any
+    /// mediator boilerplate at the call site. The concrete <typeparamref name="TImplementation"/>
+    /// is also registered (scoped) so the proxy can resolve it.
+    /// </para>
+    /// <para>
+    /// The legacy mediator path (<c>ICommandor.SendAsync(...)</c> and the
+    /// <c>commandor.MethodNameAsync(...)</c> extension methods) is registered alongside
+    /// the proxy for backward compatibility.
+    /// </para>
     /// </summary>
-    /// <typeparam name="TService">Service interfeysi</typeparam>
-    /// <typeparam name="TImplementation">Service implementatsiyasi</typeparam>
-    /// <param name="services">Service collection</param>
-    /// <returns>Service collection</returns>
+    /// <typeparam name="TService">Service interface (must inherit <see cref="global::Commandor.ICommandorService"/>).</typeparam>
+    /// <typeparam name="TImplementation">Concrete implementation type.</typeparam>
     public static IServiceCollection AddCommandorService<TService, TImplementation>(this IServiceCollection services)
         where TService : class, global::Commandor.ICommandorService
         where TImplementation : class, TService
     {
-        services.AddScoped<TService, TImplementation>();
+        // Concrete impl must be resolvable on its own so the proxy can ask DI for it.
+        services.AddScoped<TImplementation>();
+
+        var proxyType = ResolveProxyType<TService>();
+        if (proxyType is not null)
+        {
+            services.AddScoped<TService>(sp =>
+            {
+                var impl = sp.GetRequiredService<TImplementation>();
+                return (TService)ActivatorUtilities.CreateInstance(sp, proxyType, impl);
+            });
+        }
+        else
+        {
+            services.AddScoped<TService>(sp => sp.GetRequiredService<TImplementation>());
+        }
+
+        // Mediator-path handlers stay registered so commandor.SendAsync / commandor.MethodNameAsync still work.
         RegisterGeneratedHandlers<TService>(services);
         return services;
+    }
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<Type, Type?> _proxyCache = new();
+
+    private static Type? ResolveProxyType<TService>()
+    {
+        return _proxyCache.GetOrAdd(typeof(TService), serviceType =>
+        {
+            return serviceType.Assembly.GetTypes()
+                .FirstOrDefault(t =>
+                    t.IsClass && !t.IsAbstract &&
+                    t.GetCustomAttribute<global::Commandor.GeneratedProxyAttribute>() is { } attr &&
+                    attr.ServiceType == serviceType);
+        });
     }
 
     /// <summary>

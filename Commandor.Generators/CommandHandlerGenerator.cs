@@ -128,9 +128,186 @@ public class CommandHandlerGenerator : IIncrementalGenerator
             sb.AppendLine();
         }
 
+        // Emit a cached proxy class that implements the service interface and
+        // intercepts every [QueryHandler]/[CommandHandler] method. Consumers
+        // register the proxy via AddCommandorService<TService, TImpl>(); from
+        // the call site they inject TService directly — no mediator wrapper.
+        var proxySource = GenerateCachedProxy(interfaceSymbol, compilation);
+        if (!string.IsNullOrEmpty(proxySource))
+            sb.AppendLine(proxySource);
+
         sb.AppendLine("}");
 
         return sb.ToString();
+    }
+
+    // ── Cached proxy class ───────────────────────────────────────────────────
+    // For every method on the service interface, emit:
+    //   - [QueryHandler]   →  cache check → call impl → cache store
+    //   - [CommandHandler] →  call impl → invalidate the service's cache
+    //   - other methods    →  straight pass-through to impl
+    private static string GenerateCachedProxy(INamedTypeSymbol interfaceSymbol, Compilation compilation)
+    {
+        var format = new SymbolDisplayFormat(
+            typeQualificationStyle: SymbolDisplayTypeQualificationStyle.NameAndContainingTypesAndNamespaces,
+            genericsOptions: SymbolDisplayGenericsOptions.IncludeTypeParameters,
+            miscellaneousOptions: SymbolDisplayMiscellaneousOptions.IncludeNullableReferenceTypeModifier,
+            globalNamespaceStyle: SymbolDisplayGlobalNamespaceStyle.Included);
+
+        var interfaceTypeName = interfaceSymbol.ToDisplayString(format);
+        var servicePrefix = GetServicePrefix(interfaceSymbol);
+        var proxyName = $"{servicePrefix}CachedProxy";
+
+        var commandHandlerAttribute = compilation.GetTypeByMetadataName("Commandor.CommandHandlerAttribute");
+        var queryHandlerAttribute = compilation.GetTypeByMetadataName("Commandor.QueryHandlerAttribute");
+        var ctType = compilation.GetTypeByMetadataName("System.Threading.CancellationToken");
+
+        var methods = interfaceSymbol.GetMembers().OfType<IMethodSymbol>()
+            .Where(m => m.MethodKind == MethodKind.Ordinary && !m.IsStatic)
+            .ToList();
+        if (methods.Count == 0) return string.Empty;
+
+        var sb = new StringBuilder();
+        sb.AppendLine($"    /// <summary>Auto-generated cached proxy for <c>{interfaceSymbol.Name}</c>. Intercepts <c>[QueryHandler]</c> and <c>[CommandHandler]</c> methods to apply caching and invalidation transparently.</summary>");
+        sb.AppendLine($"    [global::Commandor.GeneratedProxy(typeof({interfaceTypeName}))]");
+        sb.AppendLine($"    internal sealed class {proxyName} : {interfaceTypeName}");
+        sb.AppendLine("    {");
+        sb.AppendLine($"        private readonly {interfaceTypeName} _impl;");
+        sb.AppendLine("        private readonly global::Microsoft.Extensions.Caching.Memory.IMemoryCache _cache;");
+        sb.AppendLine("        private readonly global::Commandor.CommandorContext _context;");
+        sb.AppendLine();
+        sb.AppendLine($"        public {proxyName}({interfaceTypeName} impl, global::Microsoft.Extensions.Caching.Memory.IMemoryCache cache, global::Commandor.CommandorContext context)");
+        sb.AppendLine("        {");
+        sb.AppendLine("            _impl = impl ?? throw new global::System.ArgumentNullException(nameof(impl));");
+        sb.AppendLine("            _cache = cache ?? throw new global::System.ArgumentNullException(nameof(cache));");
+        sb.AppendLine("            _context = context ?? throw new global::System.ArgumentNullException(nameof(context));");
+        sb.AppendLine("        }");
+        sb.AppendLine();
+
+        foreach (var method in methods)
+        {
+            EmitProxyMethod(sb, interfaceSymbol, interfaceTypeName, method, format, ctType, commandHandlerAttribute, queryHandlerAttribute);
+        }
+
+        sb.AppendLine("    }");
+        return sb.ToString();
+    }
+
+    private static void EmitProxyMethod(
+        StringBuilder sb,
+        INamedTypeSymbol interfaceSymbol,
+        string interfaceTypeName,
+        IMethodSymbol method,
+        SymbolDisplayFormat format,
+        INamedTypeSymbol? ctType,
+        INamedTypeSymbol? commandAttr,
+        INamedTypeSymbol? queryAttr)
+    {
+        var isQuery = queryAttr != null && method.GetAttributes()
+            .Any(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, queryAttr));
+        var isCommand = !isQuery && commandAttr != null && method.GetAttributes()
+            .Any(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, commandAttr));
+
+        int cacheTtlSeconds = 0;
+        if (isQuery && queryAttr != null)
+        {
+            var attr = method.GetAttributes()
+                .FirstOrDefault(a => SymbolEqualityComparer.Default.Equals(a.AttributeClass, queryAttr));
+            var ttl = attr?.NamedArguments.FirstOrDefault(n => n.Key == "CacheTtlSeconds");
+            cacheTtlSeconds = ttl?.Value.Value is int t ? t : 0;
+        }
+
+        var returnTypeName = method.ReturnType.ToDisplayString(format);
+        var isTask = method.ReturnType is INamedTypeSymbol ret &&
+                     (ret.Name == "Task" || ret.Name == "ValueTask");
+        var returnsValue = isTask && method.ReturnType is INamedTypeSymbol r2 && r2.TypeArguments.Length > 0;
+
+        var parameters = method.Parameters;
+        var paramDecls = string.Join(", ", parameters.Select(p =>
+        {
+            var typeName = p.Type.ToDisplayString(format);
+            var dflt = p.HasExplicitDefaultValue ? $" = {FormatDefault(p)}" : string.Empty;
+            return $"{typeName} {p.Name}{dflt}";
+        }));
+        var paramForward = string.Join(", ", parameters.Select(p => p.Name));
+        var nonCtParams = parameters.Where(p => ctType == null || !SymbolEqualityComparer.Default.Equals(p.Type, ctType)).ToList();
+
+        sb.AppendLine($"        /// <inheritdoc />");
+        sb.Append($"        public {(isTask ? "async " : "")}{returnTypeName} {method.Name}(");
+        sb.Append(paramDecls);
+        sb.AppendLine(")");
+        sb.AppendLine("        {");
+
+        if (isQuery && returnsValue)
+        {
+            var responseTypeName = ((INamedTypeSymbol)method.ReturnType).TypeArguments[0].ToDisplayString(format);
+            var cacheArgs = nonCtParams.Count == 0
+                ? string.Empty
+                : ", " + string.Join(", ", nonCtParams.Select(p => p.Name));
+            sb.AppendLine($"            var cacheKey = global::Commandor.CacheKeyBuilder.Build(typeof({interfaceTypeName}), \"{method.Name}\"{cacheArgs});");
+            sb.AppendLine($"            if (global::Microsoft.Extensions.Caching.Memory.CacheExtensions.TryGetValue<{responseTypeName}>(_cache, cacheKey, out var cachedValue))");
+            sb.AppendLine("            {");
+            sb.AppendLine("                return cachedValue!;");
+            sb.AppendLine("            }");
+            sb.AppendLine();
+            sb.AppendLine($"            var result = await _impl.{method.Name}({paramForward}).ConfigureAwait(false);");
+            sb.AppendLine();
+            sb.AppendLine("            var options = new global::Microsoft.Extensions.Caching.Memory.MemoryCacheEntryOptions();");
+            sb.AppendLine($"            global::Microsoft.Extensions.Caching.Memory.MemoryCacheEntryExtensions.AddExpirationToken(options, _context.GetToken(typeof({interfaceTypeName})));");
+            if (cacheTtlSeconds > 0)
+                sb.AppendLine($"            options.AbsoluteExpirationRelativeToNow = global::System.TimeSpan.FromSeconds({cacheTtlSeconds});");
+            sb.AppendLine("            global::Microsoft.Extensions.Caching.Memory.CacheExtensions.Set(_cache, cacheKey, result, options);");
+            sb.AppendLine("            return result;");
+        }
+        else if (isCommand && isTask)
+        {
+            if (returnsValue)
+            {
+                sb.AppendLine($"            var result = await _impl.{method.Name}({paramForward}).ConfigureAwait(false);");
+                sb.AppendLine($"            _context.Invalidate(typeof({interfaceTypeName}));");
+                sb.AppendLine("            return result;");
+            }
+            else
+            {
+                sb.AppendLine($"            await _impl.{method.Name}({paramForward}).ConfigureAwait(false);");
+                sb.AppendLine($"            _context.Invalidate(typeof({interfaceTypeName}));");
+            }
+        }
+        else
+        {
+            // Pass-through for non-decorated methods.
+            if (isTask)
+            {
+                if (returnsValue)
+                    sb.AppendLine($"            return await _impl.{method.Name}({paramForward}).ConfigureAwait(false);");
+                else
+                    sb.AppendLine($"            await _impl.{method.Name}({paramForward}).ConfigureAwait(false);");
+            }
+            else if (method.ReturnsVoid)
+            {
+                sb.AppendLine($"            _impl.{method.Name}({paramForward});");
+            }
+            else
+            {
+                sb.AppendLine($"            return _impl.{method.Name}({paramForward});");
+            }
+        }
+
+        sb.AppendLine("        }");
+        sb.AppendLine();
+    }
+
+    private static string FormatDefault(IParameterSymbol p)
+    {
+        var v = p.ExplicitDefaultValue;
+        if (v == null) return "default";
+        return v switch
+        {
+            string s => "\"" + s.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"",
+            char c => "'" + c + "'",
+            bool b => b ? "true" : "false",
+            _ => v.ToString() ?? "default"
+        };
     }
 
     /// <summary>
