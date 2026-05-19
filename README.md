@@ -1,141 +1,283 @@
 # Commandor
 
-[![NuGet](https://img.shields.io/nuget/v/ICommandor.svg)](https://www.nuget.org/packages/ICommandor/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE.txt)
+A lightweight CQRS/Mediator library for .NET with automatic caching and Roslyn source generation.
 
-A lightweight CQRS/Mediator for .NET. **One injection point, two
-patterns**: send commands as instances, call queries as methods on
-auto-generated service properties.
-
-## Install
+## Installation
 
 ```bash
 dotnet add package ICommandor
 ```
 
-## 60-second tour
+## Quick Start
+
+### 1. Define Your Service Interface
+
+Commandor supports two styles for query parameters — **plain-type** (recommended for most queries) and **IRequest-based**.
 
 ```csharp
-// 1.  Define a query-only service interface. Each method is cached.
+using Commandor;
+
 public interface ITodoService : ICommandorService
 {
-    [QueryHandler(CacheTtlSeconds = 60)]
-    Task<TodoItem?> GetByIdAsync(int id, CancellationToken ct = default);
+    // Commands always use an IRequest record
+    [CommandHandler]
+    Task<Todo> CreateTodoAsync(CreateTodoCommand command, CancellationToken ct = default);
 
+    [CommandHandler]
+    Task<bool> DeleteTodoAsync(DeleteTodoCommand command, CancellationToken ct = default);
+
+    // Plain-type query — just pass the raw parameters, no wrapper record needed.
+    // The generator creates the IRequest record and a typed extension method for you.
     [QueryHandler]
-    Task<List<TodoItem>> ListAsync(string? filter = null, CancellationToken ct = default);
-}
+    Task<Todo?> GetTodoByIdAsync(int id, CancellationToken ct = default);
 
-// 2.  Implement it as a plain class. Reads only — no caching code here.
-public class TodoService(AppDbContext db) : ITodoService
-{
-    public Task<TodoItem?> GetByIdAsync(int id, CancellationToken ct = default) =>
-        db.Todos.FirstOrDefaultAsync(t => t.Id == id, ct);
-
-    public Task<List<TodoItem>> ListAsync(string? filter = null, CancellationToken ct = default) =>
-        db.Todos.Where(t => filter == null || t.Title.Contains(filter)).ToListAsync(ct);
-}
-
-// 3.  Write each command as an explicit IRequest record + handler.
-//     The handler invalidates affected query caches when its write commits.
-public sealed record CreateTodoCommand(string Title) : IRequest<TodoItem>;
-
-public sealed class CreateTodoHandler(AppDbContext db, ICommandor commandor)
-    : IRequestHandler<CreateTodoCommand, TodoItem>
-{
-    public async Task<TodoItem> HandleAsync(CreateTodoCommand cmd, CancellationToken ct = default)
-    {
-        var todo = new TodoItem { Title = cmd.Title };
-        db.Todos.Add(todo);
-        await db.SaveChangesAsync(ct);
-        commandor.Invalidate<ITodoService>();   // ← manual, explicit
-        return todo;
-    }
-}
-
-// 4.  Register.
-builder.Services.AddCommandor<Program>();
-builder.Services.AddCommandorService<ITodoService, TodoService>();
-builder.Services.AddAppCommandor();   // source-generated; only exists when at least one [QueryHandler] is present
-
-// 5.  Use it from a controller — one injected object covers both paths.
-public class TodosController(AppCommandor commandor) : ControllerBase
-{
-    [HttpGet("{id}")]
-    public Task<TodoItem?> Get(int id) =>
-        commandor.TodoService.GetByIdAsync(id);                       // cached query
-
-    [HttpGet]
-    public Task<List<TodoItem>> List(string? q) =>
-        commandor.TodoService.ListAsync(q);                           // cached query
-
-    [HttpPost]
-    public Task<TodoItem> Add([FromBody] CreateTodoCommand cmd) =>
-        commandor.SendAsync(cmd);                                     // command (instance)
+    // IRequest-based query — optional. You can also use parameterless queries directly.
+    [QueryHandler]
+    Task<List<Todo>> GetAllTodosAsync(GetAllTodosQuery query, CancellationToken ct = default);
 }
 ```
 
-The first `GetByIdAsync(7)` hits the database; the second returns the
-cached result. `SendAsync(new CreateTodoCommand(...))` runs the matching
-handler, which calls `commandor.Invalidate<ITodoService>()` and the next
-read repopulates the cache.
+### 2. Define Request Records
 
-## Two patterns, one mediator
+Commands always need request records. IRequest-based queries need them too. Plain-type queries do **not** — the generator creates an internal wrapper automatically.
 
-| | Commands | Queries |
-|---|---|---|
-| Where the contract lives | a record class (`CreateTodoCommand`) implementing `IRequest<T>` | a `[QueryHandler]` method on an `ICommandorService` interface |
-| Where the work lives | a hand-written `IRequestHandler<TRequest, TResponse>` class | the service implementation |
-| Call site | `commandor.SendAsync(cmd)` | `commandor.TodoService.SomeMethod(...)` |
-| Caching | not cached — every call dispatches | transparently memoized by the generated proxy |
-| Invalidation | the command handler decides when to call `commandor.Invalidate<TService>()` | n/a (driven by command handlers) |
+```csharp
+// Commands
+public record CreateTodoCommand(string Title) : IRequest<Todo>;
+public record DeleteTodoCommand(int Id) : IRequest<bool>;
 
-This is deliberate: the parts of CQRS that *should* be loud — the
-named-intent objects that flow through your system — are explicit, and
-the parts that *should* be quiet — boring reads — disappear into a
-single property access.
+// Zero-param query still needs a wrapper record
+public record GetAllTodosQuery() : IRequest<List<Todo>>;
 
-## Caching details
+// GetTodoByIdQuery is NOT needed — the generator creates it internally
+// when the method uses plain-type parameters (int id).
+```
 
-- Storage: `IMemoryCache`.
-- Cache key: `ServiceType.MethodName(arg1, arg2, …)`. Primitive and
-  `Guid` / `DateTime{Offset}` arguments contribute their values; complex
-  arguments contribute `TypeName#GetHashCode()`. Records work
-  out-of-the-box because their `GetHashCode()` is value-based.
-- Invalidation: `CommandorContext` keeps one `CancellationTokenSource`
-  per service type; every cached entry depends on its token, and
-  `commandor.Invalidate<TService>()` cancels it.
-- TTL: per-method `[QueryHandler(CacheTtlSeconds = N)]`. Default is
-  "until invalidated or evicted".
+### 3. Implement Your Service
 
-## What the source generator emits
+```csharp
+public class TodoService(AppDbContext db, ICommandor commandor) : ITodoService
+{
+    public async Task<Todo> CreateTodoAsync(CreateTodoCommand command, CancellationToken ct = default)
+    {
+        await commandor.InvalidateAsync<ITodoService>(ct); // clear stale cache
+        var todo = new Todo { Title = command.Title };
+        db.Todos.Add(todo);
+        await db.SaveChangesAsync(ct);
+        return todo;
+    }
 
-Two artefacts per project:
+    public async Task<bool> DeleteTodoAsync(DeleteTodoCommand command, CancellationToken ct = default)
+    {
+        await commandor.InvalidateAsync<ITodoService>(ct);
+        var todo = await db.Todos.FindAsync([command.Id], ct);
+        if (todo == null) return false;
+        db.Todos.Remove(todo);
+        await db.SaveChangesAsync(ct);
+        return true;
+    }
 
-1. **`FooServiceCachedProxy`** — one per service interface with at least
-   one `[QueryHandler]` method. Wraps the implementation: query methods
-   read/write `IMemoryCache`; non-query methods pass through.
-2. **`AppCommandor`** (plus `IServiceCollection.AddAppCommandor()`) —
-   one per project, exposes every `ICommandorService` as a property on
-   the inherited `Commandor` mediator.
+    // Plain-type method — signature matches the interface exactly
+    public Task<Todo?> GetTodoByIdAsync(int id, CancellationToken ct = default)
+        => db.Todos.FindAsync([id], ct).AsTask();
 
-Both live in the `Commandor.Generated` namespace.
+    public Task<List<Todo>> GetAllTodosAsync(GetAllTodosQuery query, CancellationToken ct = default)
+        => db.Todos.ToListAsync(ct);
+}
+```
 
-## Migrating from v2.x
+### 4. Register Services
 
-v2 routed both commands and queries through cached service proxies via
-`[CommandHandler]` / `[QueryHandler]` on the same interface. v3 splits
-the two:
+```csharp
+// Register Commandor core + memory cache
+builder.Services.AddCommandor();
 
-1. Drop `[CommandHandler]` everywhere — the attribute is gone.
-2. For each former `[CommandHandler]` method, define an explicit
-   `IRequest<T>` record and a hand-written `IRequestHandler<T, R>`
-   class. Call `commandor.Invalidate<TService>()` inside the handler.
-3. Replace direct `ITodoService` injections with `AppCommandor` and
-   access queries as properties: `commandor.TodoService.SomeMethod(...)`.
-4. Add `services.AddAppCommandor()` next to `AddCommandor()`.
-5. Stop using `commandor.GetAsync(...)` — the alias is removed.
+// Register your service + its auto-generated handlers
+builder.Services.AddCommandorService<ITodoService, TodoService>();
+```
+
+> **Tip:** If you want to scan an assembly for manually-written `IRequestHandler<>` implementations, use the generic overload:
+> ```csharp
+> builder.Services.AddCommandor<Program>(); // scans the assembly that contains Program
+> ```
+
+### 5. Use in Controllers
+
+```csharp
+[ApiController]
+[Route("api/[controller]")]
+public class TodosController(ICommandor commandor) : ControllerBase
+{
+    [HttpPost]
+    public async Task<IActionResult> CreateTodo([FromBody] CreateTodoCommand request)
+    {
+        var todo = await commandor.SendAsync(request);
+        return CreatedAtAction(nameof(GetTodoById), new { id = todo.Id }, todo);
+    }
+
+    [HttpGet("{id}")]
+    public async Task<IActionResult> GetTodoById(int id)
+    {
+        // Generated extension method — no IRequest wrapper at the call site
+        var todo = await commandor.GetTodoByIdAsync(id);
+        return todo is null ? NotFound() : Ok(todo);
+    }
+
+    [HttpGet]
+    public async Task<IActionResult> GetAllTodos()
+    {
+        // IRequest-mode generated extension
+        var todos = await commandor.GetAllTodosAsync(new GetAllTodosQuery());
+        return Ok(todos);
+    }
+}
+```
+
+---
+
+## Features
+
+### Plain-Type Query Parameters
+
+For `[QueryHandler]` methods, you can use any parameter types — no need to manually create an `IRequest<T>` record. The source generator creates an internal wrapper record and a public extension method on `ICommandor`:
+
+```csharp
+// Interface
+[QueryHandler(CacheTtlSeconds = 60)]
+Task<Product?> GetProductByIdAsync(int id, CancellationToken ct = default);
+
+// Generated (invisible — lives in generated code):
+//   internal sealed record GetProductByIdAsyncRequest(int Id) : IRequest<Product?>;
+//   public static Task<Product?> GetProductByIdAsync(this ICommandor c, int id, CancellationToken ct = default)
+//       => c.GetAsync(new GetProductByIdAsyncRequest(id), ct);
+
+// Call site — clean, no wrapper record in sight:
+var product = await commandor.GetProductByIdAsync(productId);
+```
+
+> **Commands always require an `IRequest` record** (plain-type is only for `[QueryHandler]`).
+
+### GetAsync — Semantic Query API
+
+`GetAsync` is a semantic alias for `SendAsync` when dispatching queries. Use `SendAsync` for commands and `GetAsync` for queries — the behaviour is identical, but the intent is clearer.
+
+```csharp
+// Both work; GetAsync signals "this is a read operation"
+var result1 = await commandor.SendAsync(new GetProductByIdQuery(id));
+var result2 = await commandor.GetAsync(new GetProductByIdQuery(id));
+
+// Or via the generated extension method (preferred):
+var result3 = await commandor.GetProductByIdAsync(id);
+```
+
+All three share the **same cache entry**.
+
+### Auto-Generated Extension Methods
+
+The source generator emits a typed extension method on `ICommandor` for every `[QueryHandler]` — both IRequest-mode and plain-type:
+
+| Interface method | Generated extension |
+|---|---|
+| `Task<T> GetFooAsync(FooQuery q, ...)` | `commandor.GetFooAsync(new FooQuery(...))` |
+| `Task<T> GetBarAsync(int id, ...)` | `commandor.GetBarAsync(id)` |
+
+### Automatic Caching
+
+- Every `[QueryHandler]` result is cached automatically via `IMemoryCache`.
+- Cache keys are built from the method name and a hashcode of the arguments — fast and allocation-light, no JSON serialisation.
+- Records use value-based `GetHashCode()` so structurally-equal queries share the same cache entry.
+
+### Cache Invalidation
+
+```csharp
+// Synchronous
+commandor.Invalidate<ITodoService>();
+
+// Async (preferred — flushes the change token before returning)
+await commandor.InvalidateAsync<ITodoService>(cancellationToken);
+```
+
+### Cache TTL
+
+```csharp
+[QueryHandler(CacheTtlSeconds = 300)]  // 5-minute absolute expiry
+Task<List<Product>> GetProductsAsync(GetProductsQuery query, CancellationToken ct = default);
+```
+
+### Source Generation
+
+Commandor uses an **incremental Roslyn source generator** (`IIncrementalGenerator`). It generates handler classes and extension methods for every `[CommandHandler]` and `[QueryHandler]` at compile time — no reflection at startup, no boilerplate.
+
+Generated handler classes are decorated with `[GeneratedHandler]` so the registration helpers can discover them precisely without fragile name heuristics.
+
+---
+
+## Command Pattern
+
+Commands mutate state and use `IRequest` records:
+
+```csharp
+// 1. Define the request record
+public record CreateProductCommand(string Name, decimal Price) : IRequest<Product>;
+
+// 2. Mark the interface method
+public interface IProductService : ICommandorService
+{
+    [CommandHandler]
+    Task<Product> CreateProductAsync(CreateProductCommand command, CancellationToken ct = default);
+}
+
+// 3. Dispatch
+var product = await commandor.SendAsync(new CreateProductCommand("Widget", 9.99m));
+```
+
+Commands are **not** cached. Invalidate related query caches inside the implementation.
+
+---
+
+## Query Pattern
+
+Queries are read-only and are automatically cached.
+
+### IRequest-Based (required for zero-param queries)
+
+```csharp
+public record GetAllProductsQuery() : IRequest<List<Product>>;
+
+public interface IProductService : ICommandorService
+{
+    [QueryHandler(CacheTtlSeconds = 60)]
+    Task<List<Product>> GetAllProductsAsync(GetAllProductsQuery query, CancellationToken ct = default);
+}
+
+// Dispatch via generated extension or GetAsync:
+var products = await commandor.GetAllProductsAsync(new GetAllProductsQuery());
+```
+
+### Plain-Type (recommended for parameterized queries)
+
+```csharp
+public interface IProductService : ICommandorService
+{
+    [QueryHandler(CacheTtlSeconds = 60)]
+    Task<Product?> GetProductByIdAsync(int id, CancellationToken ct = default);
+}
+
+// No record to construct — just pass the value:
+var product = await commandor.GetProductByIdAsync(42);
+```
+
+---
+
+## Method Naming Conventions
+
+| Type | Recommended prefixes |
+|---|---|
+| Commands | `Create`, `Update`, `Delete`, `Process`, `Send` |
+| Queries | `Get`, `Find`, `List`, `Search` |
+
+---
 
 ## License
 
-MIT — see [LICENSE.txt](LICENSE.txt).
+MIT

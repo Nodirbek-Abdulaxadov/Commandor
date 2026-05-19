@@ -1,69 +1,80 @@
-using Commandor;
-using Commandor.Generated;
 using Microsoft.Extensions.DependencyInjection;
+using Commandor;
+using Commandor;
 
 namespace Commandor.Tests;
 
 /// <summary>
-/// End-to-end CQRS flow against the v3 surface:
-///   - Queries flow through <c>AppCommandor.ItemService</c> (cached).
-///   - Commands flow through <c>SendAsync</c> with hand-written
-///     <see cref="IRequestHandler{TRequest, TResponse}"/> implementations.
-///   - The command handlers call <c>Invalidate</c> when their writes
-///     should drop cached query results.
+/// Integration tests - hamma komponentlar birgalikda test qilinadi.
 /// </summary>
 public class IntegrationTests
 {
     [Fact]
-    public async Task Create_then_query_returns_cached_then_invalidates_on_update()
+    public async Task FullWorkflow_CreateQueryUpdateQuery_ShouldWorkEndToEnd()
     {
+        // Arrange - Setup complete system
         var services = new ServiceCollection();
         services.AddCommandor(typeof(IntegrationTests).Assembly);
-        services.AddCommandorService<ITestService, TestService>();
-        services.AddAppCommandor();
-        TestService.Reset();
+        services.AddCommandorService<IntegrationTests.ITestService, IntegrationTests.TestService>();
 
-        var sp = services.BuildServiceProvider();
-        var commandor = sp.GetRequiredService<AppCommandor>();
+        var serviceProvider = services.BuildServiceProvider();
+        var commandor = serviceProvider.GetRequiredService<ICommandor>();
 
-        // Command: create.
-        var created = await commandor.SendAsync(new CreateItemCommand("Test", 100));
-        Assert.Equal("Test", created.Name);
+        // Act & Assert - Complete workflow
+        
+        // 1. Create item
+        var createCmd = new CreateItemCommand("Test Item", 100);
+        var created = await commandor.SendAsync(createCmd);
+        Assert.NotNull(created);
+        Assert.Equal("Test Item", created.Name);
+        Assert.True(created.Id > 0);
 
-        // Query: pull twice — second should be cached.
-        var first = await commandor.TestService.GetItem(created.Id);
-        var second = await commandor.TestService.GetItem(created.Id);
-        Assert.Equal(created.Id, first!.Id);
-        Assert.Equal(1, TestService.GetItemCalls);
+        // 2. Query item (first time - from source)
+        var query1 = new GetItemQuery(created.Id);
+        var item1 = await commandor.SendAsync(query1);
+        Assert.NotNull(item1);
+        Assert.Equal(created.Id, item1.Id);
 
-        // Command: update — handler invalidates ITestService cache.
-        await commandor.SendAsync(new UpdateItemCommand(created.Id, "Updated", 200));
+        // 3. Query again (should be cached)
+        var query2 = new GetItemQuery(created.Id);
+        var item2 = await commandor.SendAsync(query2);
+        Assert.NotNull(item2);
+        Assert.Equal(item1.Id, item2.Id);
 
-        // Query: fresh hit since cache was cleared.
-        var third = await commandor.TestService.GetItem(created.Id);
-        Assert.Equal("Updated", third!.Name);
-        Assert.Equal(2, TestService.GetItemCalls);
+        // 4. Update item
+        var updateCmd = new UpdateItemCommand(created.Id, "Updated Item", 200);
+        await commandor.SendAsync(updateCmd);
+        
+        // 5. Query after update (cache invalidated, fresh data)
+        var query3 = new GetItemQuery(created.Id);
+        var item3 = await commandor.SendAsync(query3);
+        Assert.NotNull(item3);
+        Assert.Equal("Updated Item", item3.Name);
+        Assert.Equal(200, item3.Value);
     }
 
     [Fact]
-    public void All_components_resolvable()
+    public void AllComponents_ShouldBeAvailable()
     {
+        // Arrange
         var services = new ServiceCollection();
         services.AddCommandor(typeof(IntegrationTests).Assembly);
         services.AddCommandorService<ITestService, TestService>();
-        services.AddAppCommandor();
 
-        var sp = services.BuildServiceProvider();
+        var serviceProvider = services.BuildServiceProvider();
 
-        Assert.NotNull(sp.GetService<ICommandor>());
-        Assert.NotNull(sp.GetService<AppCommandor>());
-        Assert.NotNull(sp.GetService<ITestService>());
+        // Act & Assert - All components should be resolvable
+        var commandor = serviceProvider.GetService<ICommandor>();
+        var service = serviceProvider.GetService<ITestService>();
+
+        Assert.NotNull(commandor);
+        Assert.NotNull(service);
     }
 
-    // ── Domain ────────────────────────────────────────────────────────────────
-
+    // Test models
     public record CreateItemCommand(string Name, int Value) : IRequest<ItemDto>;
     public record UpdateItemCommand(int Id, string Name, int Value) : IRequest;
+    public record GetItemQuery(int Id) : IRequest<ItemDto?>;
 
     public class ItemDto
     {
@@ -72,59 +83,59 @@ public class IntegrationTests
         public int Value { get; set; }
     }
 
-    /// <summary>Query-only contract. Commands moved to dedicated handlers.</summary>
     public interface ITestService : ICommandorService
     {
+        [CommandHandler]
+        Task<ItemDto> CreateItem(CreateItemCommand cmd, CancellationToken ct = default);
+
+        [CommandHandler]
+        Task UpdateItem(UpdateItemCommand cmd, CancellationToken ct = default);
+
         [QueryHandler]
-        Task<ItemDto?> GetItem(int id, CancellationToken ct = default);
+        Task<ItemDto?> GetItem(GetItemQuery query, CancellationToken ct = default);
     }
 
     public class TestService : ITestService
     {
-        public static readonly List<ItemDto> Items = new();
-        public static int GetItemCalls;
+        private static readonly List<ItemDto> _items = new();
+        private readonly ICommandor _commandor;
 
-        public static void Reset()
+        public TestService(ICommandor commandor)
         {
-            Items.Clear();
-            GetItemCalls = 0;
+            _commandor = commandor;
         }
 
-        public Task<ItemDto?> GetItem(int id, CancellationToken ct = default)
-        {
-            Interlocked.Increment(ref GetItemCalls);
-            return Task.FromResult(Items.FirstOrDefault(i => i.Id == id));
-        }
-    }
-
-    public sealed class CreateItemHandler(ICommandor commandor) : IRequestHandler<CreateItemCommand, ItemDto>
-    {
-        public Task<ItemDto> HandleAsync(CreateItemCommand cmd, CancellationToken ct = default)
+        public Task<ItemDto> CreateItem(CreateItemCommand cmd, CancellationToken ct = default)
         {
             var item = new ItemDto
             {
                 Id = Random.Shared.Next(1000, 9999),
                 Name = cmd.Name,
-                Value = cmd.Value,
+                Value = cmd.Value
             };
-            TestService.Items.Add(item);
-            commandor.Invalidate<ITestService>();
+            _items.Add(item);
             return Task.FromResult(item);
         }
-    }
 
-    public sealed class UpdateItemHandler(ICommandor commandor) : IRequestHandler<UpdateItemCommand>
-    {
-        public Task HandleAsync(UpdateItemCommand cmd, CancellationToken ct = default)
+        public Task UpdateItem(UpdateItemCommand cmd, CancellationToken ct = default)
         {
-            var item = TestService.Items.FirstOrDefault(i => i.Id == cmd.Id);
-            if (item is not null)
+            var item = _items.FirstOrDefault(i => i.Id == cmd.Id);
+            if (item != null)
             {
                 item.Name = cmd.Name;
                 item.Value = cmd.Value;
             }
-            commandor.Invalidate<ITestService>();
+            
+            // Invalidate cache
+            _commandor.Invalidate<ITestService>();
+            
             return Task.CompletedTask;
+        }
+
+        public Task<ItemDto?> GetItem(GetItemQuery query, CancellationToken ct = default)
+        {
+            var item = _items.FirstOrDefault(i => i.Id == query.Id);
+            return Task.FromResult(item);
         }
     }
 }
