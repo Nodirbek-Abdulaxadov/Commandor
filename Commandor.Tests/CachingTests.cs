@@ -97,8 +97,8 @@ public class CachingTests
         var cmd = sp.GetRequiredService<ICommandor>();
 
         // Two calls with identical primitive arguments → one service call
-        var r1 = await cmd.Search(id: 10, keyword: "hello");
-        var r2 = await cmd.Search(id: 10, keyword: "hello");
+        var r1 = await cmd.CachingTestsPlainTypeService.Search(id: 10, keyword: "hello");
+        var r2 = await cmd.CachingTestsPlainTypeService.Search(id: 10, keyword: "hello");
 
         Assert.Equal(r1, r2);
         Assert.Equal(1, PlainTypeService.CallCount);
@@ -111,8 +111,8 @@ public class CachingTests
         var cmd = sp.GetRequiredService<ICommandor>();
 
         // Different id → different cache entry
-        var r1 = await cmd.Search(id: 1, keyword: "x");
-        var r2 = await cmd.Search(id: 2, keyword: "x");
+        var r1 = await cmd.CachingTestsPlainTypeService.Search(id: 1, keyword: "x");
+        var r2 = await cmd.CachingTestsPlainTypeService.Search(id: 2, keyword: "x");
 
         Assert.NotEqual(r1, r2);
         Assert.Equal(2, PlainTypeService.CallCount);
@@ -124,11 +124,11 @@ public class CachingTests
         var sp = BuildPlainTypeProvider();
         var cmd = sp.GetRequiredService<ICommandor>();
 
-        await cmd.Search(id: 5, keyword: "a");
+        await cmd.CachingTestsPlainTypeService.Search(id: 5, keyword: "a");
         Assert.Equal(1, PlainTypeService.CallCount);
 
         cmd.Invalidate<IPlainTypeService>();
-        await cmd.Search(id: 5, keyword: "a");  // cache was cleared
+        await cmd.CachingTestsPlainTypeService.Search(id: 5, keyword: "a");  // cache was cleared
 
         Assert.Equal(2, PlainTypeService.CallCount);
     }
@@ -142,8 +142,8 @@ public class CachingTests
         var filter1 = new SearchFilter("active", 1);
         var filter2 = new SearchFilter("active", 1);  // same value, different instance
 
-        var r1 = await cmd.SearchWithFilter(filter1);
-        var r2 = await cmd.SearchWithFilter(filter2); // should hit cache
+        var r1 = await cmd.CachingTestsPlainTypeService.SearchWithFilter(filter1);
+        var r2 = await cmd.CachingTestsPlainTypeService.SearchWithFilter(filter2); // should hit cache
 
         Assert.Equal(r1, r2);
         Assert.Equal(1, PlainTypeService.FilterCallCount);

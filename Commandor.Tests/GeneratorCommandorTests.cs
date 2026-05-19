@@ -130,38 +130,38 @@ public class GeneratorCommandorTests
     // [QueryHandler] method, so callers never need to type the request record.
 
     [Fact]
-    public async Task ExtensionMethod_GetProductById_ShouldWork()
+    public async Task ServiceProxy_GetProductById_ShouldWork()
     {
         var created = await _commandor.SendAsync(new CreateProductCommand("Ext Product", 9999, 1));
 
-        // Generated extension: commandor.GetProductById(query) → commandor.GetAsync(query)
-        var product = await _commandor.GetProductById(new GetProductByIdQuery(created.Id));
+        // Generated proxy: commandor.ProductService.GetProductById(query) → commandor.GetAsync(query)
+        var product = await _commandor.ProductService.GetProductById(new GetProductByIdQuery(created.Id));
 
         Assert.NotNull(product);
         Assert.Equal("Ext Product", product.Name);
     }
 
     [Fact]
-    public async Task ExtensionMethod_ShouldShareCacheWithGetAsync()
+    public async Task ServiceProxy_ShouldShareCacheWithGetAsync()
     {
         var created = await _commandor.SendAsync(new CreateProductCommand("Cache Ext", 100, 1));
         var query = new GetProductByIdQuery(created.Id);
 
         var r1 = await _commandor.GetAsync(query);
-        var r2 = await _commandor.GetProductById(query); // same cache key
+        var r2 = await _commandor.ProductService.GetProductById(query); // same cache key
 
         Assert.Equal(r1!.Id, r2!.Id);
         Assert.Equal(1, ProductService.GetProductByIdCallCount);
     }
 
     [Fact]
-    public async Task ExtensionMethod_ParameterlessQuery_WithCancellationTokenOnly_ShouldWorkAndCache()
+    public async Task ServiceProxy_ParameterlessQuery_WithCancellationTokenOnly_ShouldWorkAndCache()
     {
         await _commandor.SendAsync(new CreateProductCommand("P1", 10, 1));
         await _commandor.SendAsync(new CreateProductCommand("P2", 20, 2));
 
-        var list1 = await _commandor.GetAllProducts();
-        var list2 = await _commandor.GetAllProducts();
+        var list1 = await _commandor.ProductService.GetAllProducts();
+        var list2 = await _commandor.ProductService.GetAllProducts();
 
         Assert.Equal(2, list1.Count);
         Assert.Equal(2, list2.Count);
@@ -169,12 +169,12 @@ public class GeneratorCommandorTests
     }
 
     [Fact]
-    public async Task ExtensionMethod_ParameterlessQuery_WithNoParameters_ShouldWorkAndCache()
+    public async Task ServiceProxy_ParameterlessQuery_WithNoParameters_ShouldWorkAndCache()
     {
         await _commandor.SendAsync(new CreateProductCommand("P3", 30, 3));
 
-        var count1 = await _commandor.GetProductsCount();
-        var count2 = await _commandor.GetProductsCount();
+        var count1 = await _commandor.ProductService.GetProductsCount();
+        var count2 = await _commandor.ProductService.GetProductsCount();
 
         Assert.Equal(count1, count2);
         Assert.True(count1 >= 1);
