@@ -4,9 +4,9 @@ namespace Commandor;
 /// Marks a method on an <see cref="ICommandorService"/> interface as a query
 /// handler. The source generator wraps the method in a caching proxy:
 /// results are stored in <see cref="Microsoft.Extensions.Caching.Memory.IMemoryCache"/>
-/// and keyed by the argument values. The cache is automatically invalidated
-/// when a <see cref="CommandHandlerAttribute"/>-marked method on the same
-/// service runs.
+/// and keyed by the argument values. Cache invalidation is manual — call
+/// <see cref="ICommandor.Invalidate{TService}"/> from the command handler
+/// whose writes should drop this service's cached results.
 /// </summary>
 [AttributeUsage(AttributeTargets.Method, AllowMultiple = false, Inherited = false)]
 public sealed class QueryHandlerAttribute : Attribute

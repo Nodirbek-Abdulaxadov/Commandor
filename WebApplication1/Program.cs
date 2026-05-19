@@ -1,3 +1,4 @@
+using Commandor.Generated;
 using WebApplication1.Data;
 using WebApplication1.Features;
 
@@ -9,9 +10,11 @@ builder.Services.AddControllers();
 // Add DbContext
 builder.Services.AddDbContext<AppDbContext>();
 
-// Add Commandor with auto-generated handlers
-builder.Services.AddCommandor();
+// Add Commandor: mediator + memory cache + handler scan, the cached
+// service proxy, and the generated AppCommandor with query properties.
+builder.Services.AddCommandor<Program>();
 builder.Services.AddCommandorService<ITodoService, TodoService>();
+builder.Services.AddAppCommandor();
 
 // Add NSwag OpenAPI/Swagger
 builder.Services.AddOpenApiDocument(config =>

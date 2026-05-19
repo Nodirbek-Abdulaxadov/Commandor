@@ -6,14 +6,22 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Commandor;
 
 /// <summary>
-/// Commandor - asosiy mediator implementatsiyasi
+/// Default <see cref="ICommandor"/> implementation. Marked <c>public</c>
+/// and non-sealed so the source generator can emit an
+/// <c>AppCommandor : Commandor</c> subclass with one property per
+/// registered <see cref="ICommandorService"/>.
 /// </summary>
 public class Commandor : ICommandor
 {
-    private readonly IServiceProvider _serviceProvider;
-    private readonly CommandorContext _context;
+    /// <summary>
+    /// Service provider used to resolve handlers and (for the generated
+    /// <c>AppCommandor</c> subclass) cached service proxies. Marked
+    /// <c>protected</c> so subclasses can hand out service properties
+    /// like <c>commandor.TodoService</c>.
+    /// </summary>
+    protected readonly IServiceProvider _serviceProvider;
+    protected readonly CommandorContext _context;
 
-    // Cache MakeGenericType + GetMethod results so reflection cost is paid only once per request type.
     private static readonly ConcurrentDictionary<(Type RequestType, Type ResponseType), (Type HandlerType, MethodInfo Method)> _handlerCache = new();
 
     public Commandor(IServiceProvider serviceProvider, CommandorContext context)
@@ -22,9 +30,6 @@ public class Commandor : ICommandor
         _context = context ?? throw new ArgumentNullException(nameof(context));
     }
 
-    /// <summary>
-    /// Javobsiz requestni yuborish — no reflection; resolved via generic DI lookup.
-    /// </summary>
     public async Task SendAsync<TRequest>(TRequest request, CancellationToken cancellationToken = default)
         where TRequest : IRequest
     {
@@ -38,9 +43,6 @@ public class Commandor : ICommandor
         await handler.HandleAsync(request, cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>
-    /// Javobli requestni yuborish — MethodInfo cached per (requestType, responseType) pair.
-    /// </summary>
     public async Task<TResponse> SendAsync<TResponse>(IRequest<TResponse> request, CancellationToken cancellationToken = default)
     {
         if (request == null)
@@ -64,12 +66,6 @@ public class Commandor : ICommandor
 
         return await ((Task<TResponse>)cached.Method.Invoke(handler, [request, cancellationToken])!).ConfigureAwait(false);
     }
-
-    /// <summary>
-    /// SendAsync ning semantik muqobili — faqat query (GET) operatsiyalar uchun.
-    /// </summary>
-    public Task<TResponse> GetAsync<TResponse>(IRequest<TResponse> request, CancellationToken cancellationToken = default)
-        => SendAsync(request, cancellationToken);
 
     public void Invalidate<TService>()
     {
