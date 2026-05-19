@@ -2,10 +2,22 @@
 
 A lightweight CQRS/Mediator library for .NET with automatic caching and Roslyn source generation.
 
+## Requirements
+
+- .NET 10 SDK (or newer) on the build machine
+- `<LangVersion>latest</LangVersion>` (or `14`+) in the consuming project — the source generator emits a C# 14 extension property for the service-grouped call site
+- Target framework: `net8.0`, `net9.0`, or `net10.0`
+
 ## Installation
 
 ```bash
 dotnet add package ICommandor
+```
+
+```xml
+<PropertyGroup>
+  <LangVersion>latest</LangVersion>
+</PropertyGroup>
 ```
 
 ## Quick Start
@@ -27,7 +39,7 @@ public interface ITodoService : ICommandorService
     Task<bool> DeleteTodoAsync(DeleteTodoCommand command, CancellationToken ct = default);
 
     // Plain-type query — just pass the raw parameters, no wrapper record needed.
-    // The generator creates the IRequest record and a typed extension method for you.
+    // The generator creates the IRequest record and the proxy method for you.
     [QueryHandler]
     Task<Todo?> GetTodoByIdAsync(int id, CancellationToken ct = default);
 
@@ -118,16 +130,16 @@ public class TodosController(ICommandor commandor) : ControllerBase
     [HttpGet("{id}")]
     public async Task<IActionResult> GetTodoById(int id)
     {
-        // Generated extension method — no IRequest wrapper at the call site
-        var todo = await commandor.GetTodoByIdAsync(id);
+        // Generated service proxy — queries are grouped under commandor.<Service>
+        var todo = await commandor.TodoService.GetTodoByIdAsync(id);
         return todo is null ? NotFound() : Ok(todo);
     }
 
     [HttpGet]
     public async Task<IActionResult> GetAllTodos()
     {
-        // IRequest-mode generated extension
-        var todos = await commandor.GetAllTodosAsync(new GetAllTodosQuery());
+        // IRequest-mode query through the same proxy
+        var todos = await commandor.TodoService.GetAllTodosAsync(new GetAllTodosQuery());
         return Ok(todos);
     }
 }
@@ -137,49 +149,60 @@ public class TodosController(ICommandor commandor) : ControllerBase
 
 ## Features
 
-### Plain-Type Query Parameters
+### Service-Grouped Query Proxy
 
-For `[QueryHandler]` methods, you can use any parameter types — no need to manually create an `IRequest<T>` record. The source generator creates an internal wrapper record and a public extension method on `ICommandor`:
+Every interface with `[QueryHandler]` methods exposes its queries through a proxy reached by an extension property on `ICommandor`. The property name is derived from the interface (`IProductService` → `commandor.ProductService`).
 
 ```csharp
-// Interface
-[QueryHandler(CacheTtlSeconds = 60)]
-Task<Product?> GetProductByIdAsync(int id, CancellationToken ct = default);
+public interface IProductService : ICommandorService
+{
+    [QueryHandler(CacheTtlSeconds = 60)]
+    Task<Product?> GetProductByIdAsync(int id, CancellationToken ct = default);
+
+    [QueryHandler]
+    Task<List<Product>> GetAllProductsAsync(CancellationToken ct = default);
+}
 
 // Generated (invisible — lives in generated code):
 //   internal sealed record GetProductByIdAsyncRequest(int Id) : IRequest<Product?>;
-//   public static Task<Product?> GetProductByIdAsync(this ICommandor c, int id, CancellationToken ct = default)
-//       => c.GetAsync(new GetProductByIdAsyncRequest(id), ct);
+//   public readonly struct ProductServiceCommandorProxy { ... }
+//   public static class CommandorProductServiceExtensions
+//   {
+//       extension(ICommandor commandor)
+//       {
+//           public ProductServiceCommandorProxy ProductService => new(commandor);
+//       }
+//   }
 
-// Call site — clean, no wrapper record in sight:
-var product = await commandor.GetProductByIdAsync(productId);
+// Call site — grouped by service, no wrapper record in sight:
+var product  = await commandor.ProductService.GetProductByIdAsync(42);
+var products = await commandor.ProductService.GetAllProductsAsync();
 ```
 
-> **Commands always require an `IRequest` record** (plain-type is only for `[QueryHandler]`).
+> **Commands are not exposed through the proxy.** Dispatch commands with `commandor.SendAsync(command)`.
+
+### Plain-Type Query Parameters
+
+For `[QueryHandler]` methods, you can use any parameter types — no need to manually create an `IRequest<T>` record. The generator creates an internal wrapper record and a typed method on the service proxy:
+
+```csharp
+[QueryHandler(CacheTtlSeconds = 60)]
+Task<Product?> GetProductByIdAsync(int id, CancellationToken ct = default);
+
+// Call site:
+var product = await commandor.ProductService.GetProductByIdAsync(productId);
+```
 
 ### GetAsync — Semantic Query API
 
 `GetAsync` is a semantic alias for `SendAsync` when dispatching queries. Use `SendAsync` for commands and `GetAsync` for queries — the behaviour is identical, but the intent is clearer.
 
 ```csharp
-// Both work; GetAsync signals "this is a read operation"
+// All three share the same cache entry:
 var result1 = await commandor.SendAsync(new GetProductByIdQuery(id));
 var result2 = await commandor.GetAsync(new GetProductByIdQuery(id));
-
-// Or via the generated extension method (preferred):
-var result3 = await commandor.GetProductByIdAsync(id);
+var result3 = await commandor.ProductService.GetProductByIdAsync(id); // preferred
 ```
-
-All three share the **same cache entry**.
-
-### Auto-Generated Extension Methods
-
-The source generator emits a typed extension method on `ICommandor` for every `[QueryHandler]` — both IRequest-mode and plain-type:
-
-| Interface method | Generated extension |
-|---|---|
-| `Task<T> GetFooAsync(FooQuery q, ...)` | `commandor.GetFooAsync(new FooQuery(...))` |
-| `Task<T> GetBarAsync(int id, ...)` | `commandor.GetBarAsync(id)` |
 
 ### Automatic Caching
 
@@ -206,7 +229,7 @@ Task<List<Product>> GetProductsAsync(GetProductsQuery query, CancellationToken c
 
 ### Source Generation
 
-Commandor uses an **incremental Roslyn source generator** (`IIncrementalGenerator`). It generates handler classes and extension methods for every `[CommandHandler]` and `[QueryHandler]` at compile time — no reflection at startup, no boilerplate.
+Commandor uses an **incremental Roslyn source generator** (`IIncrementalGenerator`). It generates handler classes, request wrappers, and service proxies for every `[CommandHandler]` and `[QueryHandler]` at compile time — no reflection at startup, no boilerplate.
 
 Generated handler classes are decorated with `[GeneratedHandler]` so the registration helpers can discover them precisely without fragile name heuristics.
 
@@ -237,9 +260,9 @@ Commands are **not** cached. Invalidate related query caches inside the implemen
 
 ## Query Pattern
 
-Queries are read-only and are automatically cached.
+Queries are read-only and are automatically cached. Every `[QueryHandler]` is reachable through `commandor.<ServiceName>.<MethodName>(...)`.
 
-### IRequest-Based (required for zero-param queries)
+### IRequest-Based (required for zero-param queries that take a query record)
 
 ```csharp
 public record GetAllProductsQuery() : IRequest<List<Product>>;
@@ -250,8 +273,7 @@ public interface IProductService : ICommandorService
     Task<List<Product>> GetAllProductsAsync(GetAllProductsQuery query, CancellationToken ct = default);
 }
 
-// Dispatch via generated extension or GetAsync:
-var products = await commandor.GetAllProductsAsync(new GetAllProductsQuery());
+var products = await commandor.ProductService.GetAllProductsAsync(new GetAllProductsQuery());
 ```
 
 ### Plain-Type (recommended for parameterized queries)
@@ -264,8 +286,38 @@ public interface IProductService : ICommandorService
 }
 
 // No record to construct — just pass the value:
-var product = await commandor.GetProductByIdAsync(42);
+var product = await commandor.ProductService.GetProductByIdAsync(42);
 ```
+
+### Truly Parameterless (no parameters at all, not even a query record)
+
+```csharp
+public interface IProductService : ICommandorService
+{
+    [QueryHandler]
+    Task<int> GetProductsCountAsync();
+}
+
+var count = await commandor.ProductService.GetProductsCountAsync();
+```
+
+---
+
+## Migration from 1.x → 4.0
+
+The flat extension methods generated by 1.x are removed. Move call sites under the service proxy:
+
+```csharp
+// before (1.x)
+await commandor.GetProductByIdAsync(id);
+await commandor.GetAllProductsAsync(new GetAllProductsQuery());
+
+// after (4.0)
+await commandor.ProductService.GetProductByIdAsync(id);
+await commandor.ProductService.GetAllProductsAsync(new GetAllProductsQuery());
+```
+
+`SendAsync`, `GetAsync`, `Invalidate`, and `InvalidateAsync` on `ICommandor` are unchanged.
 
 ---
 
